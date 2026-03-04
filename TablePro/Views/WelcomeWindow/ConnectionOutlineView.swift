@@ -83,7 +83,7 @@ struct ConnectionOutlineView: NSViewRepresentable {
         outlineView.rowSizeStyle = .default
         outlineView.usesAutomaticRowHeights = false
         outlineView.indentationPerLevel = 20
-        outlineView.backgroundColor = .controlBackgroundColor
+        outlineView.backgroundColor = .clear
 
         outlineView.registerForDraggedTypes([.outlineItem])
         outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
@@ -396,9 +396,7 @@ final class ConnectionNSOutlineView: NSOutlineView {
     weak var coordinator: ConnectionOutlineView.Coordinator?
 
     override func drawBackground(inClipRect clipRect: NSRect) {
-        // Draw solid background instead of the translucent sourceList gray
-        backgroundColor.setFill()
-        clipRect.fill()
+        // Sip the translucent gray; SwiftUI parent background shows through
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

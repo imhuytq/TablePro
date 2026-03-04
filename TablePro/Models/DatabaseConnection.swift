@@ -253,7 +253,6 @@ struct DatabaseConnection: Identifiable, Hashable {
     var aiPolicy: AIConnectionPolicy?
     var mongoReadPreference: String?
     var mongoWriteConcern: String?
-    var groupId: UUID?
     var sortOrder: Int
 
     init(
@@ -273,7 +272,6 @@ struct DatabaseConnection: Identifiable, Hashable {
         aiPolicy: AIConnectionPolicy? = nil,
         mongoReadPreference: String? = nil,
         mongoWriteConcern: String? = nil,
-        groupId: UUID? = nil,
         sortOrder: Int = 0
     ) {
         self.id = id
@@ -292,7 +290,6 @@ struct DatabaseConnection: Identifiable, Hashable {
         self.aiPolicy = aiPolicy
         self.mongoReadPreference = mongoReadPreference
         self.mongoWriteConcern = mongoWriteConcern
-        self.groupId = groupId
         self.sortOrder = sortOrder
     }
 

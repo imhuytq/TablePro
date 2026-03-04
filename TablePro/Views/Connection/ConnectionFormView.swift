@@ -636,11 +636,11 @@ struct ConnectionFormView: View {
             sslConfig: sslConfig,
             color: connectionColor,
             tagId: selectedTagId,
+            groupId: selectedGroupId,
             isReadOnly: isReadOnly,
             aiPolicy: aiPolicy,
             mongoReadPreference: mongoReadPreference.isEmpty ? nil : mongoReadPreference,
-            mongoWriteConcern: mongoWriteConcern.isEmpty ? nil : mongoWriteConcern,
-            groupId: selectedGroupId
+            mongoWriteConcern: mongoWriteConcern.isEmpty ? nil : mongoWriteConcern
         )
 
         // Save passwords to Keychain
@@ -735,9 +735,9 @@ struct ConnectionFormView: View {
             sslConfig: sslConfig,
             color: connectionColor,
             tagId: selectedTagId,
+            groupId: selectedGroupId,
             mongoReadPreference: mongoReadPreference.isEmpty ? nil : mongoReadPreference,
-            mongoWriteConcern: mongoWriteConcern.isEmpty ? nil : mongoWriteConcern,
-            groupId: selectedGroupId
+            mongoWriteConcern: mongoWriteConcern.isEmpty ? nil : mongoWriteConcern
         )
 
         Task {

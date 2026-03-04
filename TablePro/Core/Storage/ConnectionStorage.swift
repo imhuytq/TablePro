@@ -358,8 +358,7 @@ private struct StoredConnection: Codable {
     // AI policy
     let aiPolicy: String?
 
-    // Group
-    let groupId: String?
+    // Sort order
     let sortOrder: Int
 
     init(from connection: DatabaseConnection) {
@@ -397,8 +396,7 @@ private struct StoredConnection: Codable {
         // AI policy
         self.aiPolicy = connection.aiPolicy?.rawValue
 
-        // Group
-        self.groupId = connection.groupId?.uuidString
+        // Sort order
         self.sortOrder = connection.sortOrder
     }
 
@@ -436,7 +434,6 @@ private struct StoredConnection: Codable {
         groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
         isReadOnly = try container.decodeIfPresent(Bool.self, forKey: .isReadOnly) ?? false
         aiPolicy = try container.decodeIfPresent(String.self, forKey: .aiPolicy)
-        groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
         sortOrder = try container.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
     }
 
@@ -462,7 +459,6 @@ private struct StoredConnection: Codable {
         let parsedTagId = tagId.flatMap { UUID(uuidString: $0) }
         let parsedGroupId = groupId.flatMap { UUID(uuidString: $0) }
         let parsedAIPolicy = aiPolicy.flatMap { AIConnectionPolicy(rawValue: $0) }
-        let parsedGroupId = groupId.flatMap { UUID(uuidString: $0) }
 
         return DatabaseConnection(
             id: id,
@@ -479,7 +475,6 @@ private struct StoredConnection: Codable {
             groupId: parsedGroupId,
             isReadOnly: isReadOnly,
             aiPolicy: parsedAIPolicy,
-            groupId: parsedGroupId,
             sortOrder: sortOrder
         )
     }
