@@ -1144,18 +1144,7 @@ extension ConnectionOutlineView {
                 .sorted { $0.sortOrder < $1.sortOrder }
 
             for group in rootGroups {
-                let groupItem = NSMenuItem(
-                    title: group.name,
-                    action: #selector(contextMenuMoveToGroup(_:)),
-                    keyEquivalent: ""
-                )
-                groupItem.target = self
-                groupItem.representedObject = ConnectionMoveInfo(connection: connection, targetGroupId: group.id)
-                groupItem.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
-                if connection.groupId == group.id {
-                    groupItem.state = .on
-                }
-                moveMenu.addItem(groupItem)
+                moveMenu.addItem(moveToGroupMenuItem(for: connection, group: group))
             }
 
             let moveItem = NSMenuItem(title: String(localized: "Move to Group"), action: nil, keyEquivalent: "")
@@ -1242,6 +1231,63 @@ extension ConnectionOutlineView {
         @objc private func contextMenuDeleteConnection(_ sender: NSMenuItem) {
             guard let connection = sender.representedObject as? DatabaseConnection else { return }
             parent.onDeleteConnection?(connection)
+        }
+
+        /// Build an NSMenuItem for a group — if it has children, wrap in a submenu
+        private func moveToGroupMenuItem(
+            for connection: DatabaseConnection,
+            group: ConnectionGroup
+        ) -> NSMenuItem {
+            let childGroups = parent.groups
+                .filter { $0.parentGroupId == group.id }
+                .sorted { $0.sortOrder < $1.sortOrder }
+
+            let folderImage = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(paletteColors: [
+                    group.color.isDefault ? .secondaryLabelColor : NSColor(group.color.color),
+                ]))
+
+            if childGroups.isEmpty {
+                let item = NSMenuItem(
+                    title: group.name,
+                    action: #selector(contextMenuMoveToGroup(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = ConnectionMoveInfo(connection: connection, targetGroupId: group.id)
+                item.image = folderImage
+                if connection.groupId == group.id {
+                    item.state = .on
+                }
+                return item
+            } else {
+                let submenu = NSMenu()
+
+                // First item: select this group itself
+                let selfItem = NSMenuItem(
+                    title: group.name,
+                    action: #selector(contextMenuMoveToGroup(_:)),
+                    keyEquivalent: ""
+                )
+                selfItem.target = self
+                selfItem.representedObject = ConnectionMoveInfo(connection: connection, targetGroupId: group.id)
+                selfItem.image = folderImage
+                if connection.groupId == group.id {
+                    selfItem.state = .on
+                }
+                submenu.addItem(selfItem)
+
+                submenu.addItem(.separator())
+
+                for child in childGroups {
+                    submenu.addItem(moveToGroupMenuItem(for: connection, group: child))
+                }
+
+                let item = NSMenuItem(title: group.name, action: nil, keyEquivalent: "")
+                item.submenu = submenu
+                item.image = folderImage
+                return item
+            }
         }
 
         @objc private func contextMenuMoveToGroup(_ sender: NSMenuItem) {

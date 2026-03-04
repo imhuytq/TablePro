@@ -18,6 +18,12 @@ struct ConnectionGroupEditor: View {
         return groupStorage.group(for: id)
     }
 
+    private func children(of parentId: UUID?) -> [ConnectionGroup] {
+        allGroups
+            .filter { $0.parentGroupId == parentId }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
     var body: some View {
         Menu {
             Button {
@@ -32,21 +38,13 @@ struct ConnectionGroupEditor: View {
                 }
             }
 
-            Divider()
+            let rootGroups = children(of: nil)
+            if !rootGroups.isEmpty {
+                Divider()
+            }
 
-            ForEach(sortedGroupsFlat(), id: \.group.id) { item in
-                Button {
-                    selectedGroupId = item.group.id
-                } label: {
-                    HStack {
-                        Image(nsImage: colorDot(item.group.color.color))
-                        Text("\(item.prefix)\(item.group.name)")
-                        if selectedGroupId == item.group.id {
-                            Spacer()
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
+            ForEach(rootGroups) { group in
+                groupMenuItem(group)
             }
 
             Divider()
@@ -57,7 +55,7 @@ struct ConnectionGroupEditor: View {
                 Label("Create New Group...", systemImage: "plus.circle")
             }
 
-            if allGroups.contains(where: { _ in true }) {
+            if !allGroups.isEmpty {
                 Divider()
 
                 Menu("Manage Groups") {
@@ -98,28 +96,58 @@ struct ConnectionGroupEditor: View {
 
     // MARK: - Helpers
 
-    private struct FlatGroupItem {
-        let group: ConnectionGroup
-        let prefix: String
-    }
+    private func groupMenuItem(_ group: ConnectionGroup) -> AnyView {
+        let subgroups = children(of: group.id)
+        if subgroups.isEmpty {
+            return AnyView(
+                Button {
+                    selectedGroupId = group.id
+                } label: {
+                    HStack {
+                        Image(nsImage: colorDot(group.color.color))
+                        Text(group.name)
+                        if selectedGroupId == group.id {
+                            Spacer()
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            )
+        } else {
+            return AnyView(
+                Menu {
+                    Button {
+                        selectedGroupId = group.id
+                    } label: {
+                        HStack {
+                            Image(nsImage: colorDot(group.color.color))
+                            Text(group.name)
+                            if selectedGroupId == group.id {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
 
-    private func sortedGroupsFlat() -> [FlatGroupItem] {
-        var result: [FlatGroupItem] = []
-        func walk(_ parentId: UUID?, depth: Int) {
-            let children = allGroups
-                .filter { $0.parentGroupId == parentId }
-                .sorted { $0.sortOrder < $1.sortOrder }
-            for child in children {
-                let prefix = String(repeating: "  ", count: depth)
-                result.append(FlatGroupItem(group: child, prefix: prefix))
-                walk(child.id, depth: depth + 1)
-            }
+                    Divider()
+
+                    ForEach(subgroups) { child in
+                        groupMenuItem(child)
+                    }
+                } label: {
+                    HStack {
+                        Image(nsImage: colorDot(group.color.color))
+                        Text(group.name)
+                        if selectedGroupId == group.id {
+                            Spacer()
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            )
         }
-        walk(nil, depth: 0)
-        return result
     }
 
-    /// Create a colored circle NSImage for use in menu items
     private func colorDot(_ color: Color) -> NSImage {
         let size = NSSize(width: 10, height: 10)
         let image = NSImage(size: size, flipped: false) { rect in

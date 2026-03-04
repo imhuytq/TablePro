@@ -15,6 +15,9 @@ struct ConnectionGroupFormSheet: View {
 
     @State private var name: String = ""
     @State private var color: ConnectionColor = .blue
+    @State private var selectedParentId: UUID?
+
+    private let groupStorage = GroupStorage.shared
 
     init(
         group: ConnectionGroup? = nil,
@@ -26,26 +29,45 @@ struct ConnectionGroupFormSheet: View {
         self.onSave = onSave
     }
 
+    /// All groups excluding self and descendants when editing
+    private var availableGroups: [ConnectionGroup] {
+        let allGroups = groupStorage.loadGroups()
+        guard let editingGroup = group else { return allGroups }
+        let excludedIds = collectDescendantIds(of: editingGroup.id, in: allGroups)
+            .union([editingGroup.id])
+        return allGroups.filter { !excludedIds.contains($0.id) }
+    }
+
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 0) {
             Text(group == nil ? String(localized: "New Group") : String(localized: "Edit Group"))
                 .font(.headline)
+                .padding(.top, 20)
 
-            TextField(String(localized: "Group name"), text: $name)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 200)
+            Form {
+                Section {
+                    TextField(String(localized: "Name"), text: $name, prompt: Text("Group name"))
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Color")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                GroupColorPicker(selectedColor: $color)
+                    LabeledContent(String(localized: "Color")) {
+                        GroupColorPicker(selectedColor: $color)
+                    }
+
+                    LabeledContent(String(localized: "Parent Group")) {
+                        ParentGroupPicker(
+                            selectedParentId: $selectedParentId,
+                            allGroups: availableGroups
+                        )
+                    }
+                }
             }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
 
             HStack {
                 Button("Cancel") {
                     dismiss()
                 }
+                .keyboardShortcut(.cancelAction)
 
                 Button(group == nil ? String(localized: "Create") : String(localized: "Save")) {
                     save()
@@ -54,13 +76,16 @@ struct ConnectionGroupFormSheet: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+            .padding(.bottom, 20)
         }
-        .padding(20)
-        .frame(width: 300)
+        .frame(width: 360)
         .onAppear {
             if let group {
                 name = group.name
                 color = group.color
+                selectedParentId = group.parentGroupId
+            } else {
+                selectedParentId = parentGroupId
             }
         }
         .onExitCommand {
@@ -75,18 +100,151 @@ struct ConnectionGroupFormSheet: View {
         if var existing = group {
             existing.name = trimmedName
             existing.color = color
+            existing.parentGroupId = selectedParentId
             onSave?(existing)
         } else {
-            let sortOrder = GroupStorage.shared.nextSortOrder(parentId: parentGroupId)
+            let sortOrder = groupStorage.nextSortOrder(parentId: selectedParentId)
             let newGroup = ConnectionGroup(
                 name: trimmedName,
                 color: color,
-                parentGroupId: parentGroupId,
+                parentGroupId: selectedParentId,
                 sortOrder: sortOrder
             )
             onSave?(newGroup)
         }
         dismiss()
+    }
+
+    private func collectDescendantIds(of groupId: UUID, in groups: [ConnectionGroup]) -> Set<UUID> {
+        var result = Set<UUID>()
+        let children = groups.filter { $0.parentGroupId == groupId }
+        for child in children {
+            result.insert(child.id)
+            result.formUnion(collectDescendantIds(of: child.id, in: groups))
+        }
+        return result
+    }
+}
+
+// MARK: - Parent Group Picker
+
+/// Menu-based group picker with nested submenus for child groups
+private struct ParentGroupPicker: View {
+    @Binding var selectedParentId: UUID?
+    let allGroups: [ConnectionGroup]
+
+    private var selectedGroup: ConnectionGroup? {
+        guard let id = selectedParentId else { return nil }
+        return allGroups.first { $0.id == id }
+    }
+
+    private func children(of parentId: UUID?) -> [ConnectionGroup] {
+        allGroups
+            .filter { $0.parentGroupId == parentId }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    var body: some View {
+        Menu {
+            Button {
+                selectedParentId = nil
+            } label: {
+                HStack {
+                    Text("None")
+                    if selectedParentId == nil {
+                        Spacer()
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+
+            let rootGroups = children(of: nil)
+            if !rootGroups.isEmpty {
+                Divider()
+            }
+
+            ForEach(rootGroups) { group in
+                groupMenuItem(group)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                if let group = selectedGroup {
+                    Image(systemName: "folder.fill")
+                        .foregroundStyle(group.color.color)
+                        .font(.system(size: 10))
+                    Text(group.name)
+                        .foregroundStyle(.primary)
+                } else {
+                    Text("None")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private func groupMenuItem(_ group: ConnectionGroup) -> AnyView {
+        let subgroups = children(of: group.id)
+        if subgroups.isEmpty {
+            return AnyView(
+                Button {
+                    selectedParentId = group.id
+                } label: {
+                    HStack {
+                        Image(nsImage: colorDot(group.color.color))
+                        Text(group.name)
+                        if selectedParentId == group.id {
+                            Spacer()
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            )
+        } else {
+            return AnyView(
+                Menu {
+                    Button {
+                        selectedParentId = group.id
+                    } label: {
+                        HStack {
+                            Image(nsImage: colorDot(group.color.color))
+                            Text(group.name)
+                            if selectedParentId == group.id {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    ForEach(subgroups) { child in
+                        groupMenuItem(child)
+                    }
+                } label: {
+                    HStack {
+                        Image(nsImage: colorDot(group.color.color))
+                        Text(group.name)
+                        if selectedParentId == group.id {
+                            Spacer()
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    private func colorDot(_ color: Color) -> NSImage {
+        let size = NSSize(width: 10, height: 10)
+        let image = NSImage(size: size, flipped: false) { rect in
+            NSColor(color).setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 }
 

@@ -16,7 +16,7 @@ struct WelcomeWindowView: View {
     private static let logger = Logger(subsystem: "com.TablePro", category: "WelcomeWindowView")
     private let storage = ConnectionStorage.shared
     private let groupStorage = GroupStorage.shared
-    @ObservedObject private var dbManager = DatabaseManager.shared
+    private let dbManager = DatabaseManager.shared
 
     @State private var connections: [DatabaseConnection] = []
     @State private var searchText = ""
@@ -28,11 +28,9 @@ struct WelcomeWindowView: View {
     // Group state
     @State private var groups: [ConnectionGroup] = []
     @State private var expandedGroups: Set<UUID> = []
-    @State private var showNewGroupSheet = false
-    @State private var groupToEdit: ConnectionGroup?
+    @State private var groupFormContext: GroupFormContext?
     @State private var groupToDelete: ConnectionGroup?
     @State private var showDeleteGroupConfirmation = false
-    @State private var newGroupParentId: UUID?
 
     @Environment(\.openWindow) private var openWindow
 
@@ -97,20 +95,19 @@ struct WelcomeWindowView: View {
         } message: { group in
             Text("Are you sure you want to delete \"\(group.name)\"? Connections will be ungrouped.")
         }
-        .sheet(isPresented: $showNewGroupSheet) {
+        .sheet(item: $groupFormContext) { context in
             ConnectionGroupFormSheet(
-                group: groupToEdit,
-                parentGroupId: newGroupParentId
+                group: context.group,
+                parentGroupId: context.parentGroupId
             ) { group in
-                if groupToEdit != nil {
+                if context.group != nil {
                     groupStorage.updateGroup(group)
                 } else {
                     groupStorage.addGroup(group)
                     expandedGroups.insert(group.id)
                     groupStorage.saveExpandedGroupIds(expandedGroups)
                 }
-                groupToEdit = nil
-                newGroupParentId = nil
+                groupFormContext = nil
                 loadConnections()
             }
         }
@@ -280,14 +277,10 @@ struct WelcomeWindowView: View {
                 openWindow(id: "connection-form")
             },
             onNewGroup: { parentId in
-                groupToEdit = nil
-                newGroupParentId = parentId
-                showNewGroupSheet = true
+                groupFormContext = GroupFormContext(group: nil, parentGroupId: parentId)
             },
             onEditGroup: { group in
-                groupToEdit = group
-                newGroupParentId = group.parentGroupId
-                showNewGroupSheet = true
+                groupFormContext = GroupFormContext(group: group, parentGroupId: group.parentGroupId)
             },
             onDeleteGroup: { group in
                 groupToDelete = group
@@ -445,6 +438,15 @@ struct WelcomeWindowView: View {
         }
         groupStorage.saveExpandedGroupIds(expandedGroups)
     }
+}
+
+// MARK: - GroupFormContext
+
+/// Identifiable wrapper so `.sheet(item:)` creates fresh content with correct values
+private struct GroupFormContext: Identifiable {
+    let id = UUID()
+    let group: ConnectionGroup?
+    let parentGroupId: UUID?
 }
 
 // MARK: - WelcomeButtonStyle
