@@ -6,8 +6,8 @@
 //  Supports configurable options for each format including compression.
 //
 
-import Combine
 import Foundation
+import Observation
 import os
 
 // MARK: - Export Error
@@ -71,14 +71,14 @@ struct ExportState {
 // MARK: - Export Service
 
 /// Service responsible for exporting table data to various formats
-@MainActor
-final class ExportService: ObservableObject {
+@MainActor @Observable
+final class ExportService {
     private static let logger = Logger(subsystem: "com.TablePro", category: "ExportService")
     // swiftlint:disable:next force_try
     private static let decimalFormatRegex = try! NSRegularExpression(pattern: #"^[+-]?\d+\.\d+$"#)
     // MARK: - Published State
 
-    @Published var state = ExportState()
+    var state = ExportState()
 
     // MARK: - DDL Failure Tracking
 
@@ -186,7 +186,7 @@ final class ExportService: ObservableObject {
         var failedCount = 0
         for table in tables {
             do {
-                if databaseType == .mongodb {
+                if databaseType == .mongodb || databaseType == .redis {
                     if let count = try await driver.fetchApproximateRowCount(table: table.name) {
                         total += count
                     }
@@ -270,6 +270,8 @@ final class ExportService: ObservableObject {
                 return "db\(escaped).find({})"
             }
             return "db.\(escaped).find({})"
+        case .redis:
+            return "SCAN 0 MATCH \"*\" COUNT 10000"
         default:
             return "SELECT * FROM \(qualifiedTableRef(for: table))"
         }
@@ -1159,7 +1161,8 @@ final class ExportService: ObservableObject {
             }
             if foundHeader {
                 var processedLine = line
-                let ddlAccessor = "db.\(collection)"
+                let escapedForDDL = collection.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                let ddlAccessor = "db[\"\(escapedForDDL)\"]"
                 if processedLine.hasPrefix(ddlAccessor) {
                     processedLine = collectionAccessor + processedLine.dropFirst(ddlAccessor.count)
                 }

@@ -194,4 +194,148 @@ struct NativeTabRegistryTests {
         #expect(NativeTabRegistry.shared.allTabs(for: connectionId).isEmpty)
         #expect(!NativeTabRegistry.shared.hasWindows(for: connectionId))
     }
+
+    // MARK: - isRegistered
+
+    @Test("isRegistered returns true for a registered window")
+    func isRegisteredReturnsTrueForRegisteredWindow() {
+        let windowId = UUID()
+        let connectionId = UUID()
+
+        NativeTabRegistry.shared.register(windowId: windowId, connectionId: connectionId, tabs: [makeSnapshot()], selectedTabId: nil)
+        defer { NativeTabRegistry.shared.unregister(windowId: windowId) }
+
+        #expect(NativeTabRegistry.shared.isRegistered(windowId: windowId))
+    }
+
+    @Test("isRegistered returns false for an unregistered window")
+    func isRegisteredReturnsFalseForUnknownWindow() {
+        #expect(!NativeTabRegistry.shared.isRegistered(windowId: UUID()))
+    }
+
+    @Test("isRegistered returns false after unregister")
+    func isRegisteredReturnsFalseAfterUnregister() {
+        let windowId = UUID()
+        let connectionId = UUID()
+
+        NativeTabRegistry.shared.register(windowId: windowId, connectionId: connectionId, tabs: [makeSnapshot()], selectedTabId: nil)
+        NativeTabRegistry.shared.unregister(windowId: windowId)
+
+        #expect(!NativeTabRegistry.shared.isRegistered(windowId: windowId))
+    }
+
+    // MARK: - Tab group merge scenario
+
+    @Test("Tab group merge — re-register after unregister keeps window alive")
+    func tabGroupMergeReRegister() {
+        let windowId = UUID()
+        let connectionId = UUID()
+        let tab = makeSnapshot()
+
+        // Step 1: Initial register (window appears)
+        NativeTabRegistry.shared.register(windowId: windowId, connectionId: connectionId, tabs: [tab], selectedTabId: tab.id)
+        defer { NativeTabRegistry.shared.unregister(windowId: windowId) }
+
+        // Step 2: macOS tab group merge fires onDisappear → unregister
+        NativeTabRegistry.shared.unregister(windowId: windowId)
+        #expect(!NativeTabRegistry.shared.isRegistered(windowId: windowId))
+
+        // Step 3: macOS tab group merge fires onAppear → re-register same windowId
+        NativeTabRegistry.shared.register(windowId: windowId, connectionId: connectionId, tabs: [tab], selectedTabId: tab.id)
+
+        // Window should be alive — isRegistered true, hasWindows true, tabs intact
+        #expect(NativeTabRegistry.shared.isRegistered(windowId: windowId))
+        #expect(NativeTabRegistry.shared.hasWindows(for: connectionId))
+        #expect(NativeTabRegistry.shared.allTabs(for: connectionId).count == 1)
+        #expect(NativeTabRegistry.shared.allTabs(for: connectionId).first?.id == tab.id)
+    }
+
+    @Test("Tab group merge — teardown proceeds when window is not re-registered")
+    func tabGroupMergeTeardownWhenNotReRegistered() {
+        let windowId = UUID()
+        let connectionId = UUID()
+
+        // Step 1: Initial register (window appears)
+        NativeTabRegistry.shared.register(windowId: windowId, connectionId: connectionId, tabs: [makeSnapshot()], selectedTabId: nil)
+
+        // Step 2: onDisappear fires → unregister
+        NativeTabRegistry.shared.unregister(windowId: windowId)
+
+        // Step 3: No re-register happens (genuine window close, not a merge)
+        // After the delay, isRegistered should be false → teardown should proceed
+        #expect(!NativeTabRegistry.shared.isRegistered(windowId: windowId))
+        #expect(!NativeTabRegistry.shared.hasWindows(for: connectionId))
+        #expect(NativeTabRegistry.shared.allTabs(for: connectionId).isEmpty)
+    }
+
+    // MARK: - hasOtherWindows excludes self
+
+    @Test("hasOtherWindows returns false when only self is registered")
+    func hasOtherWindowsExcludesSelf() {
+        let windowId = UUID()
+        let connectionId = UUID()
+
+        NativeTabRegistry.shared.register(windowId: windowId, connectionId: connectionId, tabs: [makeSnapshot()], selectedTabId: nil)
+        defer { NativeTabRegistry.shared.unregister(windowId: windowId) }
+
+        #expect(!NativeTabRegistry.shared.hasOtherWindows(for: connectionId, excluding: windowId))
+    }
+
+    // MARK: - hasOtherWindows true when other exists
+
+    @Test("hasOtherWindows returns true when another window exists for the same connection")
+    func hasOtherWindowsTrueWhenOtherExists() {
+        let windowId1 = UUID()
+        let windowId2 = UUID()
+        let connectionId = UUID()
+
+        NativeTabRegistry.shared.register(windowId: windowId1, connectionId: connectionId, tabs: [makeSnapshot()], selectedTabId: nil)
+        NativeTabRegistry.shared.register(windowId: windowId2, connectionId: connectionId, tabs: [makeSnapshot()], selectedTabId: nil)
+        defer {
+            NativeTabRegistry.shared.unregister(windowId: windowId1)
+            NativeTabRegistry.shared.unregister(windowId: windowId2)
+        }
+
+        #expect(NativeTabRegistry.shared.hasOtherWindows(for: connectionId, excluding: windowId1))
+        #expect(NativeTabRegistry.shared.hasOtherWindows(for: connectionId, excluding: windowId2))
+    }
+
+    // MARK: - hasOtherWindows false for unknown connection
+
+    @Test("hasOtherWindows returns false for an unknown connectionId")
+    func hasOtherWindowsFalseForUnknown() {
+        #expect(!NativeTabRegistry.shared.hasOtherWindows(for: UUID(), excluding: UUID()))
+    }
+
+    // MARK: - hasOtherWindows excludes only specified window
+
+    @Test("hasOtherWindows excludes only the specified window across multiple connections")
+    func hasOtherWindowsExcludesOnlySpecifiedWindow() {
+        let windowId1 = UUID()
+        let windowId2 = UUID()
+        let windowId3 = UUID()
+        let connectionA = UUID()
+        let connectionB = UUID()
+
+        NativeTabRegistry.shared.register(windowId: windowId1, connectionId: connectionA, tabs: [makeSnapshot()], selectedTabId: nil)
+        NativeTabRegistry.shared.register(windowId: windowId2, connectionId: connectionA, tabs: [makeSnapshot()], selectedTabId: nil)
+        NativeTabRegistry.shared.register(windowId: windowId3, connectionId: connectionB, tabs: [makeSnapshot()], selectedTabId: nil)
+        defer {
+            NativeTabRegistry.shared.unregister(windowId: windowId1)
+            NativeTabRegistry.shared.unregister(windowId: windowId2)
+            NativeTabRegistry.shared.unregister(windowId: windowId3)
+        }
+
+        // Excluding window1 from connection A — window2 still exists for A
+        #expect(NativeTabRegistry.shared.hasOtherWindows(for: connectionA, excluding: windowId1))
+
+        // Excluding window1 from connection B — window3 exists for B (window1 isn't even for B)
+        #expect(NativeTabRegistry.shared.hasOtherWindows(for: connectionB, excluding: windowId1))
+
+        // Excluding window3 from connection A — window1 and window2 still exist for A
+        #expect(NativeTabRegistry.shared.hasOtherWindows(for: connectionA, excluding: windowId3))
+
+        // Excluding window3 from connection B — no other windows for B
+        #expect(!NativeTabRegistry.shared.hasOtherWindows(for: connectionB, excluding: windowId3))
+    }
 }

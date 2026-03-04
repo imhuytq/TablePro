@@ -102,7 +102,9 @@ enum DatabaseType: String, CaseIterable, Identifiable, Codable {
     case mariadb = "MariaDB"
     case postgresql = "PostgreSQL"
     case sqlite = "SQLite"
+    case redshift = "Redshift"
     case mongodb = "MongoDB"
+    case redis = "Redis"
 
     var id: String { rawValue }
 
@@ -117,8 +119,12 @@ enum DatabaseType: String, CaseIterable, Identifiable, Codable {
             return "postgresql-icon"
         case .sqlite:
             return "sqlite-icon"
+        case .redshift:
+            return "redshift-icon"
         case .mongodb:
             return "mongodb-icon"
+        case .redis:
+            return "redis-icon"
         }
     }
 
@@ -128,7 +134,9 @@ enum DatabaseType: String, CaseIterable, Identifiable, Codable {
         case .mysql, .mariadb: return 3_306
         case .postgresql: return 5_432
         case .sqlite: return 0
+        case .redshift: return 5_439
         case .mongodb: return 27_017
+        case .redis: return 6_379
         }
     }
 
@@ -137,17 +145,17 @@ enum DatabaseType: String, CaseIterable, Identifiable, Codable {
     /// MongoDB and SQLite commonly run without authentication.
     var requiresAuthentication: Bool {
         switch self {
-        case .mysql, .mariadb, .postgresql: return true
-        case .sqlite, .mongodb: return false
+        case .mysql, .mariadb, .postgresql, .redshift: return true
+        case .sqlite, .mongodb, .redis: return false
         }
     }
 
     /// Whether this database type supports foreign key constraints
     var supportsForeignKeys: Bool {
         switch self {
-        case .mysql, .mariadb, .postgresql, .sqlite:
+        case .mysql, .mariadb, .postgresql, .sqlite, .redshift:
             return true
-        case .mongodb:
+        case .mongodb, .redis:
             return false
         }
     }
@@ -157,7 +165,7 @@ enum DatabaseType: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .mysql, .mariadb, .postgresql, .sqlite:
             return true
-        case .mongodb:
+        case .redshift, .mongodb, .redis:
             return false
         }
     }
@@ -168,7 +176,7 @@ enum DatabaseType: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .mysql, .mariadb, .sqlite:
             return "`"
-        case .postgresql, .mongodb:
+        case .postgresql, .redshift, .mongodb, .redis:
             return "\""
         }
     }
@@ -176,7 +184,7 @@ enum DatabaseType: String, CaseIterable, Identifiable, Codable {
     /// Quote an identifier (table or column name) for this database type.
     /// Escapes embedded quote characters to prevent SQL injection.
     func quoteIdentifier(_ name: String) -> String {
-        guard self != .mongodb else { return name }
+        guard self != .mongodb, self != .redis else { return name }
         let q = identifierQuote
         // Escape embedded quotes by doubling them (SQL standard)
         let escaped = name.replacingOccurrences(of: q, with: q + q)
@@ -254,6 +262,7 @@ struct DatabaseConnection: Identifiable, Hashable {
     var mongoReadPreference: String?
     var mongoWriteConcern: String?
     var sortOrder: Int
+    var redisDatabase: Int?
 
     init(
         id: UUID = UUID(),
@@ -272,7 +281,8 @@ struct DatabaseConnection: Identifiable, Hashable {
         aiPolicy: AIConnectionPolicy? = nil,
         mongoReadPreference: String? = nil,
         mongoWriteConcern: String? = nil,
-        sortOrder: Int = 0
+        sortOrder: Int = 0,
+        redisDatabase: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -291,6 +301,7 @@ struct DatabaseConnection: Identifiable, Hashable {
         self.mongoReadPreference = mongoReadPreference
         self.mongoWriteConcern = mongoWriteConcern
         self.sortOrder = sortOrder
+        self.redisDatabase = redisDatabase
     }
 
     /// Returns the display color (custom color or database type color)

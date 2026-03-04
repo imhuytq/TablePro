@@ -33,7 +33,7 @@ struct ContentView: View {
 
     @Environment(\.openWindow)
     private var openWindow
-    @EnvironmentObject private var appState: AppState
+    @Environment(AppState.self) private var appState
 
     private let storage = ConnectionStorage.shared
 
@@ -44,7 +44,11 @@ struct ContentView: View {
             defaultTitle = tableName
         } else if let connectionId = payload?.connectionId,
                   let connection = ConnectionStorage.shared.loadConnections().first(where: { $0.id == connectionId }) {
-            defaultTitle = connection.type == .mongodb ? "MQL Query" : "SQL Query"
+            switch connection.type {
+            case .mongodb: defaultTitle = "MQL Query"
+            case .redis: defaultTitle = "Redis CLI"
+            default: defaultTitle = "SQL Query"
+            }
         } else {
             defaultTitle = "SQL Query"
         }
@@ -91,7 +95,7 @@ struct ContentView: View {
             }
             // Right sidebar toggle is handled by MainContentView (has the binding)
             // Left sidebar toggle uses native NSSplitViewController.toggleSidebar via responder chain
-            .onReceive(DatabaseManager.shared.$currentSessionId) { newSessionId in
+            .onChange(of: DatabaseManager.shared.currentSessionId, initial: true) { _, newSessionId in
                 let ourConnectionId = payload?.connectionId
                 // Windows with a payload only react to their own connection
                 if ourConnectionId != nil {
@@ -109,13 +113,15 @@ struct ContentView: View {
                         AppState.shared.isConnected = true
                         AppState.shared.isReadOnly = session.connection.isReadOnly
                         AppState.shared.isMongoDB = session.connection.type == .mongodb
+                        AppState.shared.isRedis = session.connection.type == .redis
                     }
                 } else {
                     currentSession = nil
                     columnVisibility = .detailOnly
                 }
             }
-            .onReceive(DatabaseManager.shared.$activeSessions) { sessions in
+            .onChange(of: DatabaseManager.shared.sessionVersion, initial: true) { _, _ in
+                let sessions = DatabaseManager.shared.activeSessions
                 // Use our payload's connectionId, or our current session's id if already connected,
                 // or lastly the global currentSessionId (only for initial bootstrap)
                 let connectionId = payload?.connectionId ?? currentSession?.id ?? DatabaseManager.shared.currentSessionId
@@ -131,6 +137,7 @@ struct ContentView: View {
                         AppState.shared.isConnected = false
                         AppState.shared.isReadOnly = false
                         AppState.shared.isMongoDB = false
+                        AppState.shared.isRedis = false
                     }
                     return
                 }
@@ -142,6 +149,7 @@ struct ContentView: View {
                 AppState.shared.isConnected = true
                 AppState.shared.isReadOnly = newSession.connection.isReadOnly
                 AppState.shared.isMongoDB = newSession.connection.type == .mongodb
+                AppState.shared.isRedis = newSession.connection.type == .redis
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
                 // Sync AppState flags from this window's session when it becomes focused
@@ -150,10 +158,12 @@ struct ContentView: View {
                     AppState.shared.isConnected = true
                     AppState.shared.isReadOnly = session.connection.isReadOnly
                     AppState.shared.isMongoDB = session.connection.type == .mongodb
+                    AppState.shared.isRedis = session.connection.type == .redis
                 } else if payload?.connectionId != nil {
                     AppState.shared.isConnected = false
                     AppState.shared.isReadOnly = false
                     AppState.shared.isMongoDB = false
+                    AppState.shared.isRedis = false
                 }
             }
     }

@@ -10,7 +10,7 @@ import SwiftUI
 
 /// Filter panel for table data filtering
 struct FilterPanelView: View {
-    @ObservedObject var filterState: FilterStateManager
+    @Bindable var filterState: FilterStateManager
     let columns: [String]
     let primaryKeyColumn: String?
     let databaseType: DatabaseType
@@ -231,7 +231,7 @@ struct FilterPanelView: View {
             .controlSize(.small)
             .disabled(!filterState.hasAppliedFilters)
 
-            Button(databaseType == .mongodb ? "MQL" : "SQL") {
+            Button(databaseType == .mongodb ? "MQL" : databaseType == .redis ? "CMD" : "SQL") {
                 generatedSQL = filterState.generatePreviewSQL(databaseType: databaseType)
                 showSQLSheet = true
             }

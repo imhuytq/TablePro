@@ -6,26 +6,26 @@
 //  Handles database fetching, metadata loading, recent tracking, and switching logic.
 //
 
-import Combine
 import Foundation
+import Observation
 import os
 import SwiftUI
 
-@MainActor
-class DatabaseSwitcherViewModel: ObservableObject {
+@MainActor @Observable
+class DatabaseSwitcherViewModel {
     private static let logger = Logger(subsystem: "com.TablePro", category: "DatabaseSwitcherViewModel")
     // MARK: - Published State
 
-    @Published var databases: [DatabaseMetadata] = []
-    @Published var recentDatabases: [String] = []
-    @Published var searchText = ""
-    @Published var selectedDatabase: String?
-    @Published var isLoading = false
-    @Published var errorMessage: String?
-    @Published var showPreview = false
+    var databases: [DatabaseMetadata] = []
+    var recentDatabases: [String] = []
+    var searchText = ""
+    var selectedDatabase: String?
+    var isLoading = false
+    var errorMessage: String?
+    var showPreview = false
 
     /// Whether we're switching schemas (PostgreSQL) or databases (MySQL)
-    var isSchemaMode: Bool { databaseType == .postgresql }
+    var isSchemaMode: Bool { databaseType == .postgresql || databaseType == .redshift }
 
     // MARK: - Dependencies
 
@@ -168,9 +168,13 @@ class DatabaseSwitcherViewModel: ObservableObject {
             return ["information_schema", "mysql", "performance_schema", "sys"].contains(name)
         case .postgresql:
             return ["postgres", "template0", "template1"].contains(name)
+        case .redshift:
+            return ["dev", "padb_harvest"].contains(name)
         case .sqlite:
             return false
         case .mongodb:
+            return false
+        case .redis:
             return false
         }
     }

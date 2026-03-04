@@ -16,7 +16,7 @@ struct RightSidebarView: View {
     let isRowDeleted: Bool
     let onSave: () -> Void
 
-    @ObservedObject var editState: MultiRowEditState
+    var editState: MultiRowEditState
 
     @State private var searchText: String = ""
 
@@ -193,7 +193,6 @@ struct RightSidebarView: View {
                     }
                     .padding(.trailing, 15)
                 }
-
             }
             .listStyle(.sidebar)
 

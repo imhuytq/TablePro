@@ -120,9 +120,9 @@ struct SQLStatementGenerator {
     /// Get placeholder syntax for the database type
     private func placeholder(at index: Int) -> String {
         switch databaseType {
-        case .postgresql:
+        case .postgresql, .redshift:
             return "$\(index + 1)"  // PostgreSQL uses $1, $2, etc.
-        case .mysql, .mariadb, .sqlite, .mongodb:
+        case .mysql, .mariadb, .sqlite, .mongodb, .redis:
             return "?"  // MySQL, MariaDB, SQLite, and MongoDB use ?
         }
     }

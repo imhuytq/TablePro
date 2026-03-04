@@ -51,5 +51,36 @@
 			</dict>
 		</dict>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.TablePro.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>tablepro</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.TablePro.database-url</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>postgresql</string>
+				<string>postgres</string>
+				<string>mysql</string>
+				<string>mariadb</string>
+				<string>sqlite</string>
+				<string>mongodb</string>
+				<string>redis</string>
+				<string>rediss</string>
+				<string>redshift</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+		</dict>
+	</array>
 </dict>
 </plist>

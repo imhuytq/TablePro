@@ -9,6 +9,18 @@ This guide will help you download TablePro, install it, and connect to your firs
 
 ## Step 1: Download TablePro
 
+The fastest way is via [Homebrew](https://brew.sh):
+
+```bash
+brew install datlechin/tap/tablepro
+```
+
+<Tip>
+If you installed via Homebrew, skip to [Step 3](#step-3-create-your-first-connection). The cask formula handles installation and removes the macOS quarantine attribute automatically.
+</Tip>
+
+Alternatively, download manually:
+
 1. Visit the [GitHub Releases page](https://github.com/datlechin/tablepro/releases)
 2. Download the DMG file for your Mac:
    - **Apple Silicon** (M1/M2/M3/M4/M5): `TablePro-arm64.dmg`
@@ -90,6 +102,18 @@ When TablePro launches, you'll see the Welcome screen. Let's create a new databa
    - **Username**: Your database username (e.g., `postgres`)
    - **Password**: Your database password
    - **Database**: The database name to connect to
+
+### For Amazon Redshift
+
+1. Click **New Connection**
+2. Select **Amazon Redshift** as the database type
+3. Fill in the connection details:
+   - **Name**: A friendly name (e.g., "Redshift Warehouse")
+   - **Host**: Your cluster endpoint (e.g., `my-cluster.abc123.us-east-1.redshift.amazonaws.com`)
+   - **Port**: `5439` (default)
+   - **Username**: Your Redshift username (e.g., `awsuser`)
+   - **Password**: Your password
+   - **Database**: The database name (usually `dev`)
 
 ### For SQLite
 

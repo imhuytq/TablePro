@@ -21,13 +21,15 @@ enum ColumnType: Equatable {
     case json(rawType: String?)
     case enumType(rawType: String?, values: [String]?)
     case set(rawType: String?, values: [String]?)
+    case spatial(rawType: String?)
 
     /// Raw database type name (e.g., "LONGTEXT", "VARCHAR(255)", "CLOB")
     var rawType: String? {
         switch self {
         case .text(let raw), .integer(let raw), .decimal(let raw),
              .date(let raw), .timestamp(let raw), .datetime(let raw),
-             .boolean(let raw), .blob(let raw), .json(let raw):
+             .boolean(let raw), .blob(let raw), .json(let raw),
+             .spatial(let raw):
             return raw
         case .enumType(let raw, _), .set(let raw, _):
             return raw
@@ -75,6 +77,10 @@ enum ColumnType: Equatable {
             self = .enumType(rawType: rawType, values: nil)
         case 248:  // SET
             self = .set(rawType: rawType, values: nil)
+
+        // Geometry type
+        case 255:  // GEOMETRY
+            self = .spatial(rawType: rawType)
 
         // Text types (default)
         default:
@@ -125,6 +131,10 @@ enum ColumnType: Equatable {
         // Binary types
         case 17:  // BYTEA
             self = .blob(rawType: rawType)
+
+        // Native geometry types
+        case 600, 601, 602, 603, 604, 628, 718:  // point, lseg, path, box, polygon, line, circle
+            self = .spatial(rawType: rawType)
 
         // Text types (default)
         default:
@@ -209,6 +219,30 @@ enum ColumnType: Equatable {
         }
     }
 
+    // MARK: - Redis Type Mapping
+
+    /// Initialize from Redis TYPE command result string
+    init(fromRedisType type: String) {
+        switch type.lowercased() {
+        case "string":
+            self = .text(rawType: "String")
+        case "list":
+            self = .json(rawType: "List")
+        case "set":
+            self = .json(rawType: "Set")
+        case "zset":
+            self = .json(rawType: "Sorted Set")
+        case "hash":
+            self = .json(rawType: "Hash")
+        case "stream":
+            self = .json(rawType: "Stream")
+        case "none":
+            self = .text(rawType: "None")
+        default:
+            self = .text(rawType: type)
+        }
+    }
+
     // MARK: - Display Properties
 
     /// Human-readable name for this column type
@@ -225,6 +259,7 @@ enum ColumnType: Equatable {
         case .json: return "JSON"
         case .enumType: return "Enum"
         case .set: return "Set"
+        case .spatial: return "Spatial"
         }
     }
 
@@ -301,11 +336,16 @@ enum ColumnType: Equatable {
         case .boolean: return "bool"
         case .json: return "json"
         case .date, .timestamp, .datetime: return "date"
-        case .enumType: return "enum"
+        case .enumType(let rawType, _):
+            return rawType == "RedisType" ? "option" : "enum"
         case .set: return "set"
-        case .integer, .decimal: return "number"
+        case .integer(let rawType):
+            return rawType == "RedisInt" ? "second" : "number"
+        case .decimal: return "number"
         case .blob: return "binary"
-        case .text: return "string"
+        case .text(let rawType):
+            return rawType == "RedisRaw" ? "raw" : "string"
+        case .spatial: return "spatial"
         }
     }
 

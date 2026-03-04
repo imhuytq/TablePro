@@ -157,7 +157,7 @@ struct SchemaStatementGenerator {
                 isDestructive: old.dataType != new.dataType
             )
 
-        case .postgresql:
+        case .postgresql, .redshift:
             // PostgreSQL: Multiple ALTER COLUMN statements
             var statements: [String] = []
             let oldQuoted = databaseType.quoteIdentifier(old.name)
@@ -195,9 +195,9 @@ struct SchemaStatementGenerator {
                 isDestructive: old.dataType != new.dataType
             )
 
-        case .sqlite, .mongodb:
+        case .sqlite, .mongodb, .redis:
             // SQLite doesn't support ALTER COLUMN - requires table recreation
-            // MongoDB doesn't use SQL ALTER TABLE
+            // MongoDB/Redis don't use SQL ALTER TABLE
             throw DatabaseError.unsupportedOperation
         }
     }
@@ -242,14 +242,14 @@ struct SchemaStatementGenerator {
             switch databaseType {
             case .mysql, .mariadb:
                 parts.append("AUTO_INCREMENT")
-            case .postgresql:
+            case .postgresql, .redshift:
                 // PostgreSQL uses SERIAL or IDENTITY
                 // For simplicity, we'll use SERIAL
                 parts[1] = "SERIAL"
             case .sqlite:
                 parts.append("AUTOINCREMENT")
-            case .mongodb:
-                break  // MongoDB auto-generates _id
+            case .mongodb, .redis:
+                break  // MongoDB/Redis auto-generate IDs
             }
         }
 
@@ -265,11 +265,11 @@ struct SchemaStatementGenerator {
             case .mysql, .mariadb:
                 let escapedComment = comment.replacingOccurrences(of: "'", with: "''")
                 parts.append("COMMENT '\(escapedComment)'")
-            case .postgresql:
+            case .postgresql, .redshift:
                 // PostgreSQL comments are set via separate COMMENT statement
                 break
-            case .sqlite, .mongodb:
-                // SQLite/MongoDB don't support column comments
+            case .sqlite, .mongodb, .redis:
+                // SQLite/MongoDB/Redis don't support column comments
                 break
             }
         }
@@ -292,11 +292,11 @@ struct SchemaStatementGenerator {
             let indexType = index.type.rawValue
             sql = "CREATE \(uniqueKeyword)INDEX \(indexQuoted) ON \(tableQuoted) (\(columnsQuoted)) USING \(indexType)"
 
-        case .postgresql:
+        case .postgresql, .redshift:
             let indexTypeClause = index.type == .btree ? "" : "USING \(index.type.rawValue)"
             sql = "CREATE \(uniqueKeyword)INDEX \(indexQuoted) ON \(tableQuoted) \(indexTypeClause) (\(columnsQuoted))"
 
-        case .sqlite, .mongodb:
+        case .sqlite, .mongodb, .redis:
             sql = "CREATE \(uniqueKeyword)INDEX \(indexQuoted) ON \(tableQuoted) (\(columnsQuoted))"
         }
 
@@ -329,7 +329,7 @@ struct SchemaStatementGenerator {
             let tableQuoted = databaseType.quoteIdentifier(tableName)
             sql = "DROP INDEX \(indexQuoted) ON \(tableQuoted)"
 
-        case .postgresql, .sqlite, .mongodb:
+        case .postgresql, .redshift, .sqlite, .mongodb, .redis:
             sql = "DROP INDEX \(indexQuoted)"
         }
 
@@ -387,9 +387,9 @@ struct SchemaStatementGenerator {
         case .mysql, .mariadb:
             sql = "ALTER TABLE \(tableQuoted) DROP FOREIGN KEY \(fkQuoted)"
 
-        case .postgresql:
+        case .postgresql, .redshift:
             sql = "ALTER TABLE \(tableQuoted) DROP CONSTRAINT \(fkQuoted)"
-        case .sqlite, .mongodb:
+        case .sqlite, .mongodb, .redis:
             throw DatabaseError.unsupportedOperation
         }
         return SchemaStatement(
@@ -413,7 +413,7 @@ struct SchemaStatementGenerator {
             ALTER TABLE \(tableQuoted) ADD PRIMARY KEY (\(newColumnsQuoted));
             """
 
-        case .postgresql:
+        case .postgresql, .redshift:
             // Use actual constraint name if available, otherwise fall back to convention
             let pkName = primaryKeyConstraintName ?? "\(tableName)_pkey"
             sql = """
@@ -421,9 +421,9 @@ struct SchemaStatementGenerator {
             ALTER TABLE \(tableQuoted) ADD PRIMARY KEY (\(newColumnsQuoted));
             """
 
-        case .sqlite, .mongodb:
+        case .sqlite, .mongodb, .redis:
             // SQLite doesn't support modifying primary keys - requires table recreation
-            // MongoDB doesn't use SQL ALTER TABLE
+            // MongoDB/Redis don't use SQL ALTER TABLE
             throw DatabaseError.unsupportedOperation
         }
 

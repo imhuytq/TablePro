@@ -8,10 +8,7 @@
 
 import AppKit
 import CodeEditSourceEditor
-import os
 import SwiftUI
-
-private let editorContentLogger = Logger(subsystem: "com.TablePro", category: "MainEditorContentView")
 
 /// Cache for sorted query result rows to avoid re-sorting on every SwiftUI body evaluation
 private struct SortedRowsCache {
@@ -25,10 +22,10 @@ private struct SortedRowsCache {
 struct MainEditorContentView: View {
     // MARK: - Dependencies
 
-    @ObservedObject var tabManager: QueryTabManager
-    @ObservedObject var coordinator: MainContentCoordinator
-    @ObservedObject var changeManager: DataChangeManager
-    @ObservedObject var filterStateManager: FilterStateManager
+    var tabManager: QueryTabManager
+    @Bindable var coordinator: MainContentCoordinator
+    var changeManager: DataChangeManager
+    var filterStateManager: FilterStateManager
     let connection: DatabaseConnection
     let windowId: UUID
     let connectionId: UUID
@@ -74,7 +71,7 @@ struct MainEditorContentView: View {
 
     // MARK: - Environment
 
-    @EnvironmentObject private var appState: AppState
+    @Environment(AppState.self) private var appState
 
     /// Returns the cached AnyChangeManager, creating it on first access.
     private var currentChangeManager: AnyChangeManager {
@@ -106,7 +103,7 @@ struct MainEditorContentView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(.background)
         .animation(.easeInOut(duration: 0.2), value: appState.isHistoryPanelVisible)
         .onChange(of: tabManager.tabs.count) {
             // Clean up caches for closed tabs
@@ -139,7 +136,9 @@ struct MainEditorContentView: View {
             }
         }
         .onChange(of: tabManager.selectedTab?.resultVersion) { _, newVersion in
-            guard let tab = tabManager.selectedTab, newVersion != nil else { return }
+            guard let tab = tabManager.selectedTab, newVersion != nil else {
+                return
+            }
             let provider = makeRowProvider(for: tab)
             tabRowProviders[tab.id] = provider
             tabProviderVersions[tab.id] = tab.resultVersion
@@ -506,7 +505,7 @@ struct MainEditorContentView: View {
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(Color(nsColor: .quaternaryLabelColor))
                         )
-                    Text(connection.type == .mongodb ? "Open MQL Editor" : "Open SQL Editor")
+                    Text(connection.type == .mongodb ? "Open MQL Editor" : connection.type == .redis ? "Open Redis CLI" : "Open SQL Editor")
                         .font(.callout)
                         .foregroundStyle(.tertiary)
                 }

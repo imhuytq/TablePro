@@ -2,46 +2,47 @@
 //  MainContentCommandActions.swift
 //  TablePro
 //
-//  Provides command actions for MainContentView, accessible via @FocusedObject.
+//  Provides command actions for MainContentView, accessible via @FocusedValue.
 //  Menu commands and toolbar buttons call methods directly instead of posting notifications.
 //  Retains NotificationCenter subscribers only for legitimate multi-listener broadcasts.
 //
 
 import AppKit
-import Combine
 import Foundation
+import Observation
 import os
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Provides command actions for MainContentView, accessible via @FocusedObject
+/// Provides command actions for MainContentView, accessible via @FocusedValue
 @MainActor
-final class MainContentCommandActions: ObservableObject {
+@Observable
+final class MainContentCommandActions {
     nonisolated private static let logger = Logger(subsystem: "com.TablePro", category: "MainContentCommandActions")
 
     // MARK: - Dependencies
 
-    private weak var coordinator: MainContentCoordinator?
-    private let filterStateManager: FilterStateManager
-    private let connection: DatabaseConnection
+    @ObservationIgnored private weak var coordinator: MainContentCoordinator?
+    @ObservationIgnored private let filterStateManager: FilterStateManager
+    @ObservationIgnored private let connection: DatabaseConnection
 
     // MARK: - Bindings
 
-    private let selectedRowIndices: Binding<Set<Int>>
-    private let selectedTables: Binding<Set<TableInfo>>
-    private let pendingTruncates: Binding<Set<String>>
-    private let pendingDeletes: Binding<Set<String>>
-    private let tableOperationOptions: Binding<[String: TableOperationOptions]>
-    private let rightPanelState: RightPanelState
-    private let editingCell: Binding<CellPosition?>
+    @ObservationIgnored private let selectedRowIndices: Binding<Set<Int>>
+    @ObservationIgnored private let selectedTables: Binding<Set<TableInfo>>
+    @ObservationIgnored private let pendingTruncates: Binding<Set<String>>
+    @ObservationIgnored private let pendingDeletes: Binding<Set<String>>
+    @ObservationIgnored private let tableOperationOptions: Binding<[String: TableOperationOptions]>
+    @ObservationIgnored private let rightPanelState: RightPanelState
+    @ObservationIgnored private let editingCell: Binding<CellPosition?>
 
     /// The window this instance belongs to — used for key-window guards.
-    weak var window: NSWindow?
+    @ObservationIgnored weak var window: NSWindow?
 
     // MARK: - State
 
     /// Task handles for async notification observers; cancelled on deinit.
-    private var notificationTasks: [Task<Void, Never>] = []
+    @ObservationIgnored private var notificationTasks: [Task<Void, Never>] = []
 
     // MARK: - Initialization
 
@@ -150,7 +151,7 @@ final class MainContentCommandActions: ObservableObject {
 
     /// Observers for notifications still posted by non-menu views (DataGrid, SidebarView,
     /// context menus, QueryEditorView, ConnectionStatusView). These bridge AppKit/non-menu
-    /// notification posts to the same command action methods used by @FocusedObject callers.
+    /// notification posts to the same command action methods used by @FocusedValue callers.
     private func setupNonMenuNotificationObservers() {
         observeKeyWindowOnly(.addNewRow) { [weak self] _ in self?.addNewRow() }
 
@@ -304,7 +305,7 @@ final class MainContentCommandActions: ObservableObject {
 
         let template: String
         switch connection.type {
-        case .postgresql:
+        case .postgresql, .redshift:
             template = "CREATE OR REPLACE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;"
         case .mysql, .mariadb:
             template = "CREATE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;"
@@ -312,6 +313,8 @@ final class MainContentCommandActions: ObservableObject {
             template = "CREATE VIEW IF NOT EXISTS view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;"
         case .mongodb:
             template = "db.createView(\"view_name\", \"source_collection\", [\n  {\"$match\": {}},\n  {\"$project\": {\"_id\": 1}}\n])"
+        case .redis:
+            template = "-- Redis does not support views"
         }
 
         let payload = EditorTabPayload(
@@ -374,10 +377,11 @@ final class MainContentCommandActions: ObservableObject {
 
     func importTables() {
         guard !connection.isReadOnly else { return }
-        guard connection.type != .mongodb else {
+        guard connection.type != .mongodb && connection.type != .redis else {
+            let typeName = connection.type == .mongodb ? "MongoDB" : "Redis"
             AlertHelper.showErrorSheet(
                 title: String(localized: "Import Not Supported"),
-                message: String(localized: "SQL import is not supported for MongoDB connections."),
+                message: String(localized: "SQL import is not supported for \(typeName) connections."),
                 window: nil
             )
             return
@@ -603,7 +607,7 @@ final class MainContentCommandActions: ObservableObject {
             } catch {
                 let fallbackSQL: String
                 switch connection.type {
-                case .postgresql:
+                case .postgresql, .redshift:
                     fallbackSQL = "CREATE OR REPLACE VIEW \(viewName) AS\n-- Could not fetch view definition: \(error.localizedDescription)\nSELECT * FROM table_name;"
                 case .mysql, .mariadb:
                     fallbackSQL = "ALTER VIEW \(viewName) AS\n-- Could not fetch view definition: \(error.localizedDescription)\nSELECT * FROM table_name;"
@@ -611,6 +615,8 @@ final class MainContentCommandActions: ObservableObject {
                     fallbackSQL = "-- SQLite does not support ALTER VIEW. Drop and recreate:\nDROP VIEW IF EXISTS \(viewName);\nCREATE VIEW \(viewName) AS\nSELECT * FROM table_name;"
                 case .mongodb:
                     fallbackSQL = "db.runCommand({\"collMod\": \"\(viewName)\", \"viewOn\": \"source_collection\", \"pipeline\": [{\"$match\": {}}]})"
+                case .redis:
+                    fallbackSQL = "-- Redis does not support views"
                 }
 
                 let payload = EditorTabPayload(
@@ -709,5 +715,18 @@ final class MainContentCommandActions: ObservableObject {
         Task { @MainActor in
             await DatabaseManager.shared.reconnectSession(self.connection.id)
         }
+    }
+}
+
+// MARK: - Focused Value Key
+
+private struct CommandActionsKey: FocusedValueKey {
+    typealias Value = MainContentCommandActions
+}
+
+extension FocusedValues {
+    var commandActions: MainContentCommandActions? {
+        get { self[CommandActionsKey.self] }
+        set { self[CommandActionsKey.self] = newValue }
     }
 }

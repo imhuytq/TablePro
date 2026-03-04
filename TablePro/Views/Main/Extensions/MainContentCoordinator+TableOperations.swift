@@ -84,7 +84,7 @@ extension MainContentCoordinator {
     func fkDisableStatements(for dbType: DatabaseType) -> [String] {
         switch dbType {
         case .mysql, .mariadb: return ["SET FOREIGN_KEY_CHECKS=0"]
-        case .postgresql, .mongodb: return []
+        case .postgresql, .redshift, .mongodb, .redis: return []
         case .sqlite: return ["PRAGMA foreign_keys = OFF"]
         }
     }
@@ -94,7 +94,7 @@ extension MainContentCoordinator {
         switch dbType {
         case .mysql, .mariadb:
             return ["SET FOREIGN_KEY_CHECKS=1"]
-        case .postgresql, .mongodb:
+        case .postgresql, .redshift, .mongodb, .redis:
             return []
         case .sqlite:
             return ["PRAGMA foreign_keys = ON"]
@@ -109,7 +109,7 @@ extension MainContentCoordinator {
         switch dbType {
         case .mysql, .mariadb:
             return ["TRUNCATE TABLE \(quotedName)"]
-        case .postgresql:
+        case .postgresql, .redshift:
             let cascade = options.cascade ? " CASCADE" : ""
             return ["TRUNCATE TABLE \(quotedName)\(cascade)"]
         case .sqlite:
@@ -126,7 +126,10 @@ extension MainContentCoordinator {
                 "DELETE FROM sqlite_sequence WHERE name = '\(escapedName)'"
             ]
         case .mongodb:
-            return ["db.\(tableName).deleteMany({})"]
+            let escaped = tableName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            return ["db[\"\(escaped)\"].deleteMany({})"]
+        case .redis:
+            return ["FLUSHDB"]
         }
     }
 
@@ -134,12 +137,15 @@ extension MainContentCoordinator {
     private func dropTableStatement(tableName: String, quotedName: String, isView: Bool, options: TableOperationOptions, dbType: DatabaseType) -> String {
         let keyword = isView ? "VIEW" : "TABLE"
         switch dbType {
-        case .postgresql:
+        case .postgresql, .redshift:
             return "DROP \(keyword) \(quotedName)\(options.cascade ? " CASCADE" : "")"
         case .mysql, .mariadb, .sqlite:
             return "DROP \(keyword) \(quotedName)"
         case .mongodb:
-            return "db.\(tableName).drop()"
+            let escaped = tableName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            return "db[\"\(escaped)\"].drop()"
+        case .redis:
+            return "DEL \(tableName)"
         }
     }
 }

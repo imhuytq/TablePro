@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-03-04
+
+### Added
+
+- Redis database support with key-value browsing, database-level sidebar (db0–db15), TTL management, and interactive CLI
+- TablePlus-compatible database URL handling: `open -a TablePro "postgresql://user@host/db"` with support for schema switching, table opening, filters, color, and environment tags
+
+### Fixed
+
+- Fix sidebar search field and main content area background colors to blend with macOS vibrancy
+- Fix POINT and geometry columns showing blank values in MySQL and wrong type label in sidebar
+
+## [0.12.0] - 2026-03-03
+
+### Added
+
+- Amazon Redshift database support
+- Deep link support via `tablepro://` URL scheme for opening connections, tables, queries, and importing connections
+- "Copy as URL" context menu action on connections to copy connection details as a URL string (e.g., `mysql://user:pass@host/db`)
+- Auto-show inspector option: automatically open the right sidebar when selecting a row (Settings > Data Grid)
+- ENUM and SET columns now open their picker on single click with a chevron indicator, matching boolean column behavior
+- Homebrew Cask installation via `brew install datlechin/tap/tablepro`
+
+### Fixed
+
+- "Table not found" error when switching databases within the same connection (Cmd+K) while a table tab is open
+- Right sidebar state now persists across native window-tabs instead of resetting to closed
+
+## [0.11.1] - 2026-03-02
+
+### Fixed
+
+- MySQL second tab showing empty rows due to premature coordinator teardown during native macOS tab group merging
+- MongoDB tab name showing "MQL Query" instead of collection name when using bracket notation `db["collection"].find()`
+
+## [0.11.0] - 2026-03-02
+
 ### Added
 
 - Environment color indicator: subtle toolbar tint based on connection color for at-a-glance environment identification
@@ -610,7 +647,11 @@ TablePro is a native macOS database client built with SwiftUI and AppKit, design
     - Custom SQL query templates
     - Performance optimized for large datasets
 
-[Unreleased]: https://github.com/datlechin/tablepro/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/datlechin/tablepro/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/datlechin/tablepro/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/datlechin/tablepro/compare/v0.11.1...v0.12.0
+[0.11.1]: https://github.com/datlechin/tablepro/compare/v0.11.0...v0.11.1
+[0.11.0]: https://github.com/datlechin/tablepro/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/datlechin/tablepro/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/datlechin/tablepro/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/datlechin/tablepro/compare/v0.9.0...v0.9.1

@@ -19,9 +19,9 @@ struct SQLParameterInliner {
     /// - Returns: A SQL string with placeholders replaced by formatted literal values.
     static func inline(_ statement: ParameterizedStatement, databaseType: DatabaseType) -> String {
         switch databaseType {
-        case .postgresql:
+        case .postgresql, .redshift:
             return inlineDollarPlaceholders(statement.sql, parameters: statement.parameters)
-        case .mysql, .mariadb, .sqlite, .mongodb:
+        case .mysql, .mariadb, .sqlite, .mongodb, .redis:
             return inlineQuestionMarkPlaceholders(statement.sql, parameters: statement.parameters)
         }
     }

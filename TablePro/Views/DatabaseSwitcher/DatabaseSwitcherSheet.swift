@@ -18,10 +18,10 @@ struct DatabaseSwitcherSheet: View {
     let connectionId: UUID
     let onSelect: (String) -> Void
 
-    @StateObject private var viewModel: DatabaseSwitcherViewModel
+    @State private var viewModel: DatabaseSwitcherViewModel
     @State private var showCreateDialog = false
 
-    private var isSchemaMode: Bool { databaseType == .postgresql }
+    private var isSchemaMode: Bool { databaseType == .postgresql || databaseType == .redshift }
 
     init(
         isPresented: Binding<Bool>, currentDatabase: String?, databaseType: DatabaseType,
@@ -32,7 +32,7 @@ struct DatabaseSwitcherSheet: View {
         self.databaseType = databaseType
         self.connectionId = connectionId
         self.onSelect = onSelect
-        self._viewModel = StateObject(
+        self._viewModel = State(
             wrappedValue: DatabaseSwitcherViewModel(
                 connectionId: connectionId,
                 currentDatabase: currentDatabase,

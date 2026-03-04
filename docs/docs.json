@@ -36,6 +36,8 @@
                   "databases/postgresql",
                   "databases/sqlite",
                   "databases/mongodb",
+                  "databases/redis",
+                  "databases/redshift",
                   "databases/ssh-tunneling"
                 ]
               },
@@ -53,7 +55,8 @@
                   "features/import-export",
                   "features/query-history",
                   "features/ai-chat",
-                  "features/keyboard-shortcuts"
+                  "features/keyboard-shortcuts",
+                  "features/deep-links"
                 ]
               },
               {
@@ -119,6 +122,8 @@
                   "vi/databases/postgresql",
                   "vi/databases/sqlite",
                   "vi/databases/mongodb",
+                  "vi/databases/redis",
+                  "vi/databases/redshift",
                   "vi/databases/ssh-tunneling"
                 ]
               },
@@ -136,7 +141,8 @@
                   "vi/features/import-export",
                   "vi/features/query-history",
                   "vi/features/ai-chat",
-                  "vi/features/keyboard-shortcuts"
+                  "vi/features/keyboard-shortcuts",
+                  "vi/features/deep-links"
                 ]
               },
               {
@@ -195,6 +201,16 @@
           "anchor": "Releases",
           "href": "https://github.com/datlechin/tablepro/releases",
           "icon": "download"
+        },
+        {
+          "anchor": "Community",
+          "href": "https://www.facebook.com/groups/tablepro",
+          "icon": "facebook"
+        },
+        {
+          "anchor": "Telegram",
+          "href": "https://t.me/tablepro_app",
+          "icon": "telegram"
         }
       ]
     }
@@ -229,7 +245,9 @@
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/datlechin/tablepro"
+      "github": "https://github.com/datlechin/tablepro",
+      "facebook": "https://www.facebook.com/groups/tablepro",
+      "telegram": "https://t.me/tablepro_app"
     }
   },
   "integrations": {

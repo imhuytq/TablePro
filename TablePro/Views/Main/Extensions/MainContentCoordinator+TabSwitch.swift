@@ -61,7 +61,7 @@ extension MainContentCoordinator {
             if !newTab.databaseName.isEmpty {
                 let currentDatabase: String
                 if let session = DatabaseManager.shared.session(for: connectionId) {
-                    currentDatabase = session.connection.database
+                    currentDatabase = session.activeDatabase
                 } else {
                     currentDatabase = connection.database
                 }
@@ -103,7 +103,6 @@ extension MainContentCoordinator {
                     needsLazyLoad = true
                 }
             } else {
-                // Data already cached or not a table tab — bump reload and finish
                 changeManager.reloadVersion += 1
             }
         } else {

@@ -3,60 +3,40 @@
     <channel>
         <title>TablePro</title>
         <item>
-            <title>0.10.0</title>
-            <pubDate>Sun, 01 Mar 2026 13:27:04 +0000</pubDate>
-            <sparkle:version>21</sparkle:version>
-            <sparkle:shortVersionString>0.10.0</sparkle:shortVersionString>
+            <title>0.13.0</title>
+            <pubDate>Wed, 04 Mar 2026 12:03:40 +0000</pubDate>
+            <sparkle:version>25</sparkle:version>
+            <sparkle:shortVersionString>0.13.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-<html>
-<body style="font-family: -apple-system, sans-serif; font-size: 13px;">
-<h3>Added</h3>
+            <description><![CDATA[<body style="font-family: -apple-system, sans-serif; font-size: 13px; padding: 8px;"><h3>Added</h3>
 <ul>
-<li>Support for multiple independent database connections in separate windows with per-window session isolation</li>
-<li>MongoDB database support</li>
-<li>Custom About window with version info and links (Website, GitHub, Documentation)</li>
-<li>Import database connections from URL/connection string (e.g., postgresql://user:pass@host:5432/db)</li>
-<li>Release notes in Sparkle update window</li>
+<li>Redis database support with key-value browsing, database-level sidebar (db0–db15), TTL management, and interactive CLI</li>
+<li>TablePlus-compatible database URL handling: `open -a TablePro "postgresql://user@host/db"` with support for schema switching, table opening, filters, color, and environment tags</li>
 </ul>
 <h3>Fixed</h3>
 <ul>
-<li>New row (Cmd+I) and duplicated row not appearing in datagrid until manual refresh</li>
-<li>PostgreSQL SSH tunnel connections failing with "no encryption" due to SSL config not being preserved</li>
-<li>PostgreSQL SSL sslrootcert passed unconditionally to libpq, causing certificate verification failure even in Required mode</li>
-</ul>
-</body>
-</html>
-            ]]></description>
-            <enclosure url="https://github.com/datlechin/TablePro/releases/download/v0.10.0/TablePro-0.10.0-arm64.zip" length="21845325" type="application/octet-stream" sparkle:edSignature="SFnYcZG0uoQpZLmOk1fyzyymvVQhhF0PEi6qba0MpnT6l9lPvp5BkRQMg3A5zsu5PkW0euZUYWAivvKmeLv/Aw==" sparkle:architectures="arm64"/>
+<li>Fix sidebar search field and main content area background colors to blend with macOS vibrancy</li>
+<li>Fix POINT and geometry columns showing blank values in MySQL and wrong type label in sidebar</li>
+</ul></body>]]></description>
+            <enclosure url="https://github.com/datlechin/TablePro/releases/download/v0.13.0/TablePro-0.13.0-arm64.zip" length="22215385" type="application/octet-stream" sparkle:edSignature="f+ezhszehKdLQMwFiwWt6ThUJuEDBbGBeWtcM+J+2lBW5GDxxxy0C9+tnIxAfJ97vnQntrc/v9VKGRNfSOaGBQ==" sparkle:architectures="arm64"/>
         </item>
         <item>
-            <title>0.10.0</title>
-            <pubDate>Sun, 01 Mar 2026 13:27:04 +0000</pubDate>
-            <sparkle:version>21</sparkle:version>
-            <sparkle:shortVersionString>0.10.0</sparkle:shortVersionString>
+            <title>0.13.0</title>
+            <pubDate>Wed, 04 Mar 2026 12:03:40 +0000</pubDate>
+            <sparkle:version>25</sparkle:version>
+            <sparkle:shortVersionString>0.13.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-<html>
-<body style="font-family: -apple-system, sans-serif; font-size: 13px;">
-<h3>Added</h3>
+            <description><![CDATA[<body style="font-family: -apple-system, sans-serif; font-size: 13px; padding: 8px;"><h3>Added</h3>
 <ul>
-<li>Support for multiple independent database connections in separate windows with per-window session isolation</li>
-<li>MongoDB database support</li>
-<li>Custom About window with version info and links (Website, GitHub, Documentation)</li>
-<li>Import database connections from URL/connection string (e.g., postgresql://user:pass@host:5432/db)</li>
-<li>Release notes in Sparkle update window</li>
+<li>Redis database support with key-value browsing, database-level sidebar (db0–db15), TTL management, and interactive CLI</li>
+<li>TablePlus-compatible database URL handling: `open -a TablePro "postgresql://user@host/db"` with support for schema switching, table opening, filters, color, and environment tags</li>
 </ul>
 <h3>Fixed</h3>
 <ul>
-<li>New row (Cmd+I) and duplicated row not appearing in datagrid until manual refresh</li>
-<li>PostgreSQL SSH tunnel connections failing with "no encryption" due to SSL config not being preserved</li>
-<li>PostgreSQL SSL sslrootcert passed unconditionally to libpq, causing certificate verification failure even in Required mode</li>
-</ul>
-</body>
-</html>
-            ]]></description>
-            <enclosure url="https://github.com/datlechin/TablePro/releases/download/v0.10.0/TablePro-0.10.0-x86_64.zip" length="22371195" type="application/octet-stream" sparkle:edSignature="/AbGXZzCbotTf6iFnVF3eWUdmziq5+SjaiJbSdAqhIiQQsBOvvMvXD1NzIsqG+r15n/IVOKBE6DdAoI2SmtEBw==" sparkle:architectures="x86_64"/>
+<li>Fix sidebar search field and main content area background colors to blend with macOS vibrancy</li>
+<li>Fix POINT and geometry columns showing blank values in MySQL and wrong type label in sidebar</li>
+</ul></body>]]></description>
+            <enclosure url="https://github.com/datlechin/TablePro/releases/download/v0.13.0/TablePro-0.13.0-x86_64.zip" length="22790246" type="application/octet-stream" sparkle:edSignature="f4/AWg360va5+fGRaKA08wjZt/NHjQZsVPNutP8MfBDRw6xrE1cR86KQjSAbU6l9dAozEKhURTIp911AUrwQAg==" sparkle:architectures="x86_64"/>
         </item>
     </channel>
 </rss>

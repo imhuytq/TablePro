@@ -5,8 +5,8 @@
 //  Model for query tabs
 //
 
-import Combine
 import Foundation
+import Observation
 
 /// Type of tab
 enum TabType: Equatable, Codable, Hashable {
@@ -514,10 +514,10 @@ struct QueryTab: Identifiable, Equatable {
 }
 
 /// Manager for query tabs
-@MainActor
-final class QueryTabManager: ObservableObject {
-    @Published var tabs: [QueryTab] = []
-    @Published var selectedTabId: UUID?
+@MainActor @Observable
+final class QueryTabManager {
+    var tabs: [QueryTab] = []
+    var selectedTabId: UUID?
 
     var selectedTab: QueryTab? {
         guard let id = selectedTabId else { return tabs.first }
@@ -565,7 +565,10 @@ final class QueryTabManager: ObservableObject {
         let pageSize = AppSettingsManager.shared.dataGrid.defaultPageSize
         let query: String
         if databaseType == .mongodb {
-            query = "db.\(tableName).find({}).limit(\(pageSize))"
+            let escaped = tableName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            query = "db[\"\(escaped)\"].find({}).limit(\(pageSize))"
+        } else if databaseType == .redis {
+            query = "SCAN 0 MATCH * COUNT \(pageSize)"
         } else {
             let quotedName = databaseType.quoteIdentifier(tableName)
             query = "SELECT * FROM \(quotedName) LIMIT \(pageSize);"
@@ -599,7 +602,10 @@ final class QueryTabManager: ObservableObject {
         let pageSize = AppSettingsManager.shared.dataGrid.defaultPageSize
         let query: String
         if databaseType == .mongodb {
-            query = "db.\(tableName).find({}).limit(\(pageSize))"
+            let escaped = tableName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            query = "db[\"\(escaped)\"].find({}).limit(\(pageSize))"
+        } else if databaseType == .redis {
+            query = "SCAN 0 MATCH * COUNT \(pageSize)"
         } else {
             let quotedName = databaseType.quoteIdentifier(tableName)
             query = "SELECT * FROM \(quotedName) LIMIT \(pageSize);"

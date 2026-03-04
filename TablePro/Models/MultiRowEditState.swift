@@ -6,8 +6,8 @@
 //  Tracks pending edits across multiple selected rows.
 //
 
-import Combine
 import Foundation
+import Observation
 
 /// Represents the edit state for a single field across multiple rows
 struct FieldEditState {
@@ -47,9 +47,9 @@ struct FieldEditState {
 }
 
 /// Manages edit state for multi-row editing in sidebar
-@MainActor
-class MultiRowEditState: ObservableObject {
-    @Published var fields: [FieldEditState] = []
+@MainActor @Observable
+class MultiRowEditState {
+    var fields: [FieldEditState] = []
 
     var onFieldChanged: ((Int, String?) -> Void)?
 
@@ -67,7 +67,8 @@ class MultiRowEditState: ObservableObject {
         selectedRowIndices: Set<Int>,
         allRows: [[String?]],
         columns: [String],
-        columnTypes: [ColumnType]  // Changed from [String] to [ColumnType]
+        columnTypes: [ColumnType],  // Changed from [String] to [ColumnType]
+        externallyModifiedColumns: Set<Int> = []
     ) {
         // Check if the underlying data has changed (not just edits)
         let columnsChanged = self.columns != columns
@@ -116,6 +117,11 @@ class MultiRowEditState: ObservableObject {
                     isPendingNull = oldField.isPendingNull
                     isPendingDefault = oldField.isPendingDefault
                 }
+            }
+
+            // Mark externally modified columns (e.g., edited in data grid)
+            if externallyModifiedColumns.contains(colIndex), pendingValue == nil, !isPendingNull, !isPendingDefault {
+                pendingValue = originalValue ?? ""
             }
 
             newFields.append(FieldEditState(

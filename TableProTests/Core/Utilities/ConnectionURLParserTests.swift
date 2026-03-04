@@ -20,7 +20,7 @@ struct ConnectionURLParserTests {
         }
         #expect(parsed.type == .postgresql)
         #expect(parsed.host == "db.example.com")
-        #expect(parsed.port == 5432)
+        #expect(parsed.port == nil)
         #expect(parsed.database == "mydb")
         #expect(parsed.username == "admin")
         #expect(parsed.password == "secret")
@@ -68,7 +68,7 @@ struct ConnectionURLParserTests {
         }
         #expect(parsed.type == .mysql)
         #expect(parsed.host == "localhost")
-        #expect(parsed.port == 3306)
+        #expect(parsed.port == nil)
         #expect(parsed.database == "testdb")
         #expect(parsed.username == "root")
         #expect(parsed.password == "password")
@@ -227,12 +227,12 @@ struct ConnectionURLParserTests {
 
     @Test("Unsupported scheme returns error")
     func testUnsupportedSchemeReturnsError() {
-        let result = ConnectionURLParser.parse("redis://host:6379")
+        let result = ConnectionURLParser.parse("ftp://host:21")
         guard case .failure(let error) = result else {
             Issue.record("Expected failure"); return
         }
         if case .unsupportedScheme(let scheme) = error {
-            #expect(scheme == "redis")
+            #expect(scheme == "ftp")
         } else {
             Issue.record("Expected unsupportedScheme error")
         }
@@ -277,7 +277,7 @@ struct ConnectionURLParserTests {
         }
         #expect(parsed.type == .mongodb)
         #expect(parsed.host == "mongo.example.com")
-        #expect(parsed.port == 27017)
+        #expect(parsed.port == nil)
         #expect(parsed.database == "mydb")
         #expect(parsed.username == "admin")
         #expect(parsed.password == "secret")
@@ -358,6 +358,46 @@ struct ConnectionURLParserTests {
         }
         #expect(parsed.type == .postgresql)
         #expect(parsed.sshHost == "host")
+    }
+
+    @Test("SSH URL with default DB port omits port")
+    func testSSHURLDefaultPortOmitted() {
+        let result = ConnectionURLParser.parse(
+            "postgresql+ssh://deploy@bastion:22/postgres@dbhost:5432/mydb?usePrivateKey=true"
+        )
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .postgresql)
+        #expect(parsed.host == "dbhost")
+        #expect(parsed.port == nil)
+        #expect(parsed.database == "mydb")
+        #expect(parsed.username == "postgres")
+        #expect(parsed.sshHost == "bastion")
+        #expect(parsed.sshPort == 22)
+        #expect(parsed.sshUsername == "deploy")
+        #expect(parsed.usePrivateKey == true)
+    }
+
+    @Test("SSH URL with non-default DB port preserves port")
+    func testSSHURLNonDefaultPortPreserved() {
+        let result = ConnectionURLParser.parse(
+            "postgresql+ssh://deploy@bastion:22/postgres@dbhost:5433/mydb"
+        )
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.port == 5433)
+        #expect(parsed.sshPort == 22)
+    }
+
+    @Test("Non-default port preserved in standard URL")
+    func testNonDefaultPortPreserved() {
+        let result = ConnectionURLParser.parse("postgresql://user:pass@host:5433/db")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.port == 5433)
     }
 
     @Test("MariaDB SSH URL")
@@ -456,6 +496,338 @@ struct ConnectionURLParserTests {
         #expect(parsed.sshHost == "::1")
         #expect(parsed.sshPort == 22)
         #expect(parsed.host == "fe80::1")
-        #expect(parsed.port == 3306)
+        #expect(parsed.port == nil)
+    }
+
+    // MARK: - Redshift
+
+    @Test("Full Redshift URL")
+    func testFullRedshiftURL() {
+        let result = ConnectionURLParser.parse("redshift://admin:secret@cluster.us-east-1.redshift.amazonaws.com:5439/mydb")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redshift)
+        #expect(parsed.host == "cluster.us-east-1.redshift.amazonaws.com")
+        #expect(parsed.port == nil)
+        #expect(parsed.database == "mydb")
+        #expect(parsed.username == "admin")
+        #expect(parsed.password == "secret")
+    }
+
+    @Test("Redshift without port")
+    func testRedshiftWithoutPort() {
+        let result = ConnectionURLParser.parse("redshift://user:pass@host/db")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redshift)
+        #expect(parsed.port == nil)
+        #expect(parsed.host == "host")
+        #expect(parsed.database == "db")
+    }
+
+    @Test("Redshift with SSL mode")
+    func testRedshiftWithSSL() {
+        let result = ConnectionURLParser.parse("redshift://user:pass@host:5439/db?sslmode=require")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redshift)
+        #expect(parsed.sslMode == .required)
+        #expect(parsed.port == nil)
+    }
+
+    @Test("Redshift suggested name includes host and database")
+    func testRedshiftSuggestedName() {
+        let result = ConnectionURLParser.parse("redshift://user:pass@cluster.example.com/analytics")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.suggestedName == "Redshift cluster.example.com/analytics")
+    }
+
+    @Test("Redshift without user")
+    func testRedshiftWithoutUser() {
+        let result = ConnectionURLParser.parse("redshift://host:5439/db")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.username == "")
+        #expect(parsed.password == "")
+        #expect(parsed.host == "host")
+    }
+
+    @Test("Case-insensitive Redshift scheme")
+    func testCaseInsensitiveRedshiftScheme() {
+        let result = ConnectionURLParser.parse("REDSHIFT://user:pass@host/db")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redshift)
+    }
+
+    // MARK: - Redis
+
+    @Test("Redis URL parses host and port")
+    func testRedisBasicURL() {
+        let result = ConnectionURLParser.parse("redis://localhost:6379")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redis)
+        #expect(parsed.host == "localhost")
+        #expect(parsed.port == nil)
+        #expect(parsed.redisDatabase == nil)
+    }
+
+    @Test("Redis URL with database index")
+    func testRedisURLWithDatabaseIndex() {
+        let result = ConnectionURLParser.parse("redis://localhost:6379/3")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redis)
+        #expect(parsed.redisDatabase == 3)
+        #expect(parsed.database == "")
+    }
+
+    @Test("Redis URL without port")
+    func testRedisURLWithoutPort() {
+        let result = ConnectionURLParser.parse("redis://localhost")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redis)
+        #expect(parsed.host == "localhost")
+        #expect(parsed.port == nil)
+    }
+
+    @Test("Rediss scheme enables SSL")
+    func testRedissSchemeEnablesSSL() {
+        let result = ConnectionURLParser.parse("rediss://host:6379")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redis)
+        #expect(parsed.sslMode == .required)
+    }
+
+    @Test("Redis URL with password only")
+    func testRedisURLWithPasswordOnly() {
+        let result = ConnectionURLParser.parse("redis://:password@localhost:6379")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redis)
+        #expect(parsed.password == "password")
+        #expect(parsed.host == "localhost")
+    }
+
+    @Test("Redis URL with user, password, and database index")
+    func testRedisURLWithUserPasswordAndDatabase() {
+        let result = ConnectionURLParser.parse("redis://user:pass@localhost:6379/2")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redis)
+        #expect(parsed.username == "user")
+        #expect(parsed.password == "pass")
+        #expect(parsed.host == "localhost")
+        #expect(parsed.port == nil)
+        #expect(parsed.redisDatabase == 2)
+        #expect(parsed.database == "")
+    }
+
+    @Test("Redis URL with database index zero")
+    func testRedisURLWithDatabaseIndexZero() {
+        let result = ConnectionURLParser.parse("redis://localhost:6379/0")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .redis)
+        #expect(parsed.redisDatabase == 0)
+        #expect(parsed.database == "")
+    }
+
+    // MARK: - TablePlus Query Parameters
+
+    @Test("Parse statusColor parameter")
+    func testStatusColorParameter() {
+        let result = ConnectionURLParser.parse("postgresql://user@host/db?statusColor=FF0000")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.statusColor == "FF0000")
+    }
+
+    @Test("Parse env parameter")
+    func testEnvParameter() {
+        let result = ConnectionURLParser.parse("postgresql://user@host/db?env=production")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.envTag == "production")
+    }
+
+    @Test("Parse schema parameter")
+    func testSchemaParameter() {
+        let result = ConnectionURLParser.parse("postgresql://user@host/db?schema=public")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.schema == "public")
+    }
+
+    @Test("Parse table parameter")
+    func testTableParameter() {
+        let result = ConnectionURLParser.parse("postgresql://user@host/db?table=users")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.tableName == "users")
+        #expect(parsed.isView == false)
+    }
+
+    @Test("Parse view parameter sets isView flag")
+    func testViewParameterSetsIsView() {
+        let result = ConnectionURLParser.parse("postgresql://user@host/db?view=active_users")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.tableName == "active_users")
+        #expect(parsed.isView == true)
+    }
+
+    @Test("Parse filter column, operation, and value")
+    func testFilterParameters() {
+        let result = ConnectionURLParser.parse(
+            "postgresql://user@host/db?table=comments&column=content&operation=contains&value=test"
+        )
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.tableName == "comments")
+        #expect(parsed.filterColumn == "content")
+        #expect(parsed.filterOperation == "contains")
+        #expect(parsed.filterValue == "test")
+    }
+
+    @Test("Parse raw SQL condition parameter")
+    func testConditionParameter() {
+        let result = ConnectionURLParser.parse("postgresql://user@host/db?condition=age+%3E+18")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.filterCondition == "age > 18")
+    }
+
+    @Test("tLSMode integer maps to SSLMode")
+    func testTlsModeMapping() {
+        let cases: [(String, SSLMode)] = [
+            ("0", .disabled), ("1", .preferred), ("2", .required),
+            ("3", .verifyCa), ("4", .verifyIdentity)
+        ]
+        for (value, expected) in cases {
+            let result = ConnectionURLParser.parse("postgresql://user@host/db?tLSMode=\(value)")
+            guard case .success(let parsed) = result else {
+                Issue.record("Expected success for tLSMode=\(value)"); continue
+            }
+            #expect(parsed.sslMode == expected)
+        }
+    }
+
+    @Test("sslmode parameter takes priority over tLSMode")
+    func testSslModePriorityOverTlsMode() {
+        let result = ConnectionURLParser.parse("postgresql://user@host/db?sslmode=require&tLSMode=0")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.sslMode == .required)
+    }
+
+    @Test("Full TablePlus canonical URL")
+    func testFullTablePlusCanonicalURL() {
+        let result = ConnectionURLParser.parse(
+            "postgresql://postgres@127.0.0.1/tools?schema=public&table=comments&column=content&operation=contains&value=test"
+        )
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.type == .postgresql)
+        #expect(parsed.host == "127.0.0.1")
+        #expect(parsed.database == "tools")
+        #expect(parsed.username == "postgres")
+        #expect(parsed.schema == "public")
+        #expect(parsed.tableName == "comments")
+        #expect(parsed.filterColumn == "content")
+        #expect(parsed.filterOperation == "contains")
+        #expect(parsed.filterValue == "test")
+        #expect(parsed.isView == false)
+    }
+
+    @Test("Connection name from name parameter in standard URL")
+    func testConnectionNameFromStandardURL() {
+        let result = ConnectionURLParser.parse("mysql://root@localhost/db?name=My+Database")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.connectionName == "My Database")
+    }
+
+    @Test("Default isView is false when no view/table param")
+    func testDefaultIsViewFalse() {
+        let result = ConnectionURLParser.parse("postgresql://user@host/db")
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.isView == false)
+        #expect(parsed.tableName == nil)
+    }
+
+    @Test("SSH URL parses TablePlus parameters")
+    func testSSHURLTablePlusParameters() {
+        let result = ConnectionURLParser.parse(
+            "postgresql+ssh://sshuser@sshhost:22/dbuser@dbhost/mydb?table=users&schema=public&env=staging"
+        )
+        guard case .success(let parsed) = result else {
+            Issue.record("Expected success"); return
+        }
+        #expect(parsed.tableName == "users")
+        #expect(parsed.schema == "public")
+        #expect(parsed.envTag == "staging")
+        #expect(parsed.sshHost == "sshhost")
+    }
+
+    // MARK: - Color Hex Helper
+
+    @Test("connectionColor(fromHex:) maps red hex")
+    func testColorFromHexRed() {
+        let color = ConnectionURLParser.connectionColor(fromHex: "FF0000")
+        #expect(color == .red)
+    }
+
+    @Test("connectionColor(fromHex:) maps green hex")
+    func testColorFromHexGreen() {
+        let color = ConnectionURLParser.connectionColor(fromHex: "007F3D")
+        #expect(color == .green)
+    }
+
+    @Test("connectionColor(fromHex:) maps blue hex")
+    func testColorFromHexBlue() {
+        let color = ConnectionURLParser.connectionColor(fromHex: "0000FF")
+        #expect(color == .blue)
+    }
+
+    @Test("connectionColor(fromHex:) handles hash prefix")
+    func testColorFromHexWithHash() {
+        let color = ConnectionURLParser.connectionColor(fromHex: "#FF3B30")
+        #expect(color == .red)
+    }
+
+    @Test("connectionColor(fromHex:) returns none for invalid hex")
+    func testColorFromHexInvalid() {
+        let color = ConnectionURLParser.connectionColor(fromHex: "invalid")
+        #expect(color == .none)
     }
 }

@@ -7,7 +7,7 @@
 //
 
 import AppKit
-import Combine
+import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -34,7 +34,7 @@ struct ExportDialog: View {
 
     // MARK: - Export Service
 
-    @StateObject private var exportServiceState = ExportServiceState()
+    @State private var exportServiceState = ExportServiceState()
 
     // MARK: - Body
 
@@ -64,6 +64,9 @@ struct ExportDialog: View {
         .onAppear {
             if connection.type == .mongodb && config.format == .sql {
                 config.format = .mql
+            }
+            if connection.type == .redis && config.format == .sql {
+                config.format = .json
             }
         }
         .onExitCommand {
@@ -413,7 +416,7 @@ struct ExportDialog: View {
             var items: [ExportDatabaseItem] = []
 
             switch connection.type {
-            case .postgresql:
+            case .postgresql, .redshift:
                 // PostgreSQL: fetch schemas within current database (can't query across databases)
                 let schemas = try await fetchPostgreSQLSchemas(driver: driver)
                 for schema in schemas {
@@ -474,6 +477,25 @@ struct ExportDialog: View {
                 if !tableItems.isEmpty {
                     items.append(ExportDatabaseItem(
                         name: connection.database.isEmpty ? "main" : connection.database,
+                        tables: tableItems,
+                        isExpanded: true
+                    ))
+                }
+
+            case .redis:
+                // Redis: fetch keys as table items
+                let tables = try await driver.fetchTables()
+                let tableItems = tables.map { table in
+                    ExportTableItem(
+                        name: table.name,
+                        databaseName: "",
+                        type: table.type,
+                        isSelected: preselectedTables.contains(table.name)
+                    )
+                }
+                if !tableItems.isEmpty {
+                    items.append(ExportDatabaseItem(
+                        name: connection.database.isEmpty ? "db0" : connection.database,
                         tables: tableItems,
                         isExpanded: true
                     ))
@@ -671,21 +693,11 @@ struct ExportDialog: View {
 // MARK: - Export Service State
 
 /// Observable wrapper that forwards ExportService updates to SwiftUI.
-/// Instead of mirroring individual @Published properties, this forwards
-/// objectWillChange from the underlying service for automatic view updates.
+/// Since ExportService is @Observable, computed properties track through to service.state automatically.
+@Observable
 @MainActor
-final class ExportServiceState: ObservableObject {
-    private var cancellable: AnyCancellable?
-
-    private(set) var service: ExportService? {
-        didSet {
-            cancellable?.cancel()
-            guard let service else { return }
-            cancellable = service.objectWillChange
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] _ in self?.objectWillChange.send() }
-        }
-    }
+final class ExportServiceState {
+    private(set) var service: ExportService?
 
     func setService(_ service: ExportService) {
         self.service = service

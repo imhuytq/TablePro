@@ -7,7 +7,6 @@
 //
 
 import Combine
-import os
 import SwiftUI
 
 /// Main content view - thin presentation layer
@@ -30,11 +29,11 @@ struct MainContentView: View {
 
     // MARK: - State Objects
 
-    @StateObject private var tabManager: QueryTabManager
-    @StateObject private var changeManager: DataChangeManager
-    @StateObject private var filterStateManager: FilterStateManager
-    @StateObject private var toolbarState: ConnectionToolbarState
-    @StateObject var coordinator: MainContentCoordinator
+    @State private var tabManager: QueryTabManager
+    @State private var changeManager: DataChangeManager
+    @State private var filterStateManager: FilterStateManager
+    @State private var toolbarState: ConnectionToolbarState
+    @State var coordinator: MainContentCoordinator
 
     // MARK: - Local State
 
@@ -51,11 +50,9 @@ struct MainContentView: View {
 
     // MARK: - Environment
 
-    @EnvironmentObject private var appState: AppState
+    @Environment(AppState.self) private var appState
 
     // MARK: - Initialization
-
-    private static let initLogger = Logger(subsystem: "com.TablePro", category: "MainContentView")
 
     init(
         connection: DatabaseConnection,
@@ -98,6 +95,12 @@ struct MainContentView: View {
         }
         toolbarSt.hasCompletedSetup = true
 
+        // Redis: set initial database name eagerly to avoid toolbar flash
+        if connection.type == .redis {
+            let dbIndex = connection.redisDatabase ?? Int(connection.database) ?? 0
+            toolbarSt.databaseName = String(dbIndex)
+        }
+
         // Initialize single tab based on payload
         if let payload, !payload.isConnectionOnly {
             switch payload.tabType {
@@ -127,13 +130,13 @@ struct MainContentView: View {
         }
         // If payload is nil or connection-only, tab restoration handles it in initializeAndRestoreTabs()
 
-        _tabManager = StateObject(wrappedValue: tabMgr)
-        _changeManager = StateObject(wrappedValue: changeMgr)
-        _filterStateManager = StateObject(wrappedValue: filterMgr)
-        _toolbarState = StateObject(wrappedValue: toolbarSt)
+        _tabManager = State(wrappedValue: tabMgr)
+        _changeManager = State(wrappedValue: changeMgr)
+        _filterStateManager = State(wrappedValue: filterMgr)
+        _toolbarState = State(wrappedValue: toolbarSt)
 
         // Create coordinator with all dependencies
-        _coordinator = StateObject(
+        _coordinator = State(
             wrappedValue: MainContentCoordinator(
                 connection: connection,
                 tabManager: tabMgr,
@@ -249,16 +252,21 @@ struct MainContentView: View {
             .onDisappear {
                 NativeTabRegistry.shared.unregister(windowId: windowId)
 
-                // Defer the disconnect check — SwiftUI fires onDisappear+onAppear in
-                // rapid succession during body re-evaluations (e.g., when session status
-                // changes from .connecting to .connected). The short delay lets the
-                // re-registration from onAppear fire first, preventing false disconnects.
+                let capturedWindowId = windowId
                 let connectionId = connection.id
                 let connectionName = connection.name
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(200))
 
-                    // After the delay, check if any windows re-registered for this connection
+                    // If this window re-registered (temporary disappear during tab group merge), skip cleanup
+                    if NativeTabRegistry.shared.isRegistered(windowId: capturedWindowId) {
+                        return
+                    }
+
+                    // Window truly closed — teardown coordinator
+                    coordinator.teardown()
+
+                    // If no more windows for this connection, disconnect
                     guard !NativeTabRegistry.shared.hasWindows(for: connectionId) else { return }
                     let hasVisibleWindow = NSApp.windows.contains { window in
                         window.isVisible && window.subtitle == connectionName
@@ -267,8 +275,6 @@ struct MainContentView: View {
                         await DatabaseManager.shared.disconnectSession(connectionId)
                     }
                 }
-
-                coordinator.teardown()
             }
             .onChange(of: pendingChangeTrigger) {
                 updateToolbarPendingState()
@@ -290,14 +296,15 @@ struct MainContentView: View {
             .onChange(of: currentTab?.resultColumns) { _, newColumns in
                 handleColumnsChange(newColumns: newColumns)
             }
-            .onReceive(DatabaseManager.shared.$activeSessions) { sessions in
+            .onChange(of: DatabaseManager.shared.sessionVersion, initial: true) { _, _ in
+                let sessions = DatabaseManager.shared.activeSessions
                 guard let session = sessions[connection.id] else { return }
                 if session.isConnected && coordinator.needsLazyLoad {
                     coordinator.needsLazyLoad = false
                     coordinator.tabPersistence.markJustRestored()
                     if let selectedTab = tabManager.selectedTab,
                        !selectedTab.databaseName.isEmpty,
-                       selectedTab.databaseName != session.connection.database
+                       selectedTab.databaseName != session.activeDatabase
                     {
                         Task { await coordinator.switchDatabase(to: selectedTab.databaseName) }
                     } else {
@@ -332,6 +339,12 @@ struct MainContentView: View {
             }
             .onChange(of: selectedRowIndices) { _, newIndices in
                 AppState.shared.hasRowSelection = !newIndices.isEmpty
+                if !newIndices.isEmpty,
+                   AppSettingsManager.shared.dataGrid.autoShowInspector,
+                   tabManager.selectedTab?.tabType == .table
+                {
+                    rightPanelState.isPresented = true
+                }
                 scheduleInspectorUpdate()
             }
     }
@@ -429,7 +442,7 @@ struct MainContentView: View {
                 {
                     coordinator.tabPersistence.markJustRestored()
                     if !selectedTab.databaseName.isEmpty,
-                       selectedTab.databaseName != session.connection.database
+                       selectedTab.databaseName != session.activeDatabase
                     {
                         Task { await coordinator.switchDatabase(to: selectedTab.databaseName) }
                     } else {
@@ -446,7 +459,7 @@ struct MainContentView: View {
         // Connection-only payload or nil payload — restore tabs from storage
         // If other windows already exist for this connection, this is a "new tab"
         // from the native macOS "+" button — just add a single empty query tab.
-        if NativeTabRegistry.shared.hasWindows(for: connection.id) {
+        if NativeTabRegistry.shared.hasOtherWindows(for: connection.id, excluding: windowId) {
             tabManager.addTab(databaseName: connection.database)
             return
         }
@@ -502,7 +515,7 @@ struct MainContentView: View {
                 {
                     coordinator.tabPersistence.markJustRestored()
                     if !selectedTab.databaseName.isEmpty,
-                       selectedTab.databaseName != session.connection.database
+                       selectedTab.databaseName != session.activeDatabase
                     {
                         Task { await coordinator.switchDatabase(to: selectedTab.databaseName) }
                     } else {
@@ -569,7 +582,7 @@ struct MainContentView: View {
         )
 
         // Update window title to reflect selected tab
-        let queryLabel = connection.type == .mongodb ? "MQL Query" : "SQL Query"
+        let queryLabel = connection.type == .mongodb ? "MQL Query" : connection.type == .redis ? "Redis Query" : "SQL Query"
         windowTitle = tabManager.selectedTab?.tableName
             ?? (tabManager.tabs.isEmpty ? connection.name : queryLabel)
 
@@ -605,14 +618,14 @@ struct MainContentView: View {
     }
 
     private func handleTabsChange(_ newTabs: [QueryTab]) {
+        // Always update window title to reflect current tab, even during restoration
+        let queryLabel = connection.type == .mongodb ? "MQL Query" : connection.type == .redis ? "Redis Query" : "SQL Query"
+        windowTitle = tabManager.selectedTab?.tableName
+            ?? (tabManager.tabs.isEmpty ? connection.name : queryLabel)
+
         guard !coordinator.tabPersistence.isRestoringTabs,
               !coordinator.tabPersistence.isDismissing
         else { return }
-
-        // Update window title to reflect current state
-        let queryLabel = connection.type == .mongodb ? "MQL Query" : "SQL Query"
-        windowTitle = tabManager.selectedTab?.tableName
-            ?? (tabManager.tabs.isEmpty ? connection.name : queryLabel)
 
         // Update registry (non-observable, safe inside onChange)
         NativeTabRegistry.shared.update(
@@ -687,7 +700,10 @@ struct MainContentView: View {
             selectedRowIndices = []
             coordinator.openTableTab(tableName, isView: isView)
         case .revertAndOpenNewWindow:
-            syncSidebarToCurrentTab()
+            // Redis databases navigate in-place, so skip the sidebar revert
+            if connection.type != .redis {
+                syncSidebarToCurrentTab()
+            }
             coordinator.openTableTab(tableName, isView: isView)
         }
 
@@ -795,11 +811,36 @@ struct MainContentView: View {
             }
         }
 
+        // Enrich column types with loaded enum values from Phase 2b
+        var columnTypes = tab.columnTypes
+        for (i, col) in tab.resultColumns.enumerated() where i < columnTypes.count {
+            if let values = tab.columnEnumValues[col], !values.isEmpty {
+                let ct = columnTypes[i]
+                if ct.isEnumType {
+                    columnTypes[i] = .enumType(rawType: ct.rawType, values: values)
+                } else if ct.isSetType {
+                    columnTypes[i] = .set(rawType: ct.rawType, values: values)
+                }
+            }
+        }
+
+        // Clear stale sidebar edits after refresh/discard
+        if !changeManager.hasChanges {
+            rightPanelState.editState.clearEdits()
+        }
+
+        // Collect columns modified in data grid so sidebar shows green dots
+        var modifiedColumns = Set<Int>()
+        for rowIndex in selectedRowIndices {
+            modifiedColumns.formUnion(changeManager.getModifiedColumnsForRow(rowIndex))
+        }
+
         rightPanelState.editState.configure(
             selectedRowIndices: selectedRowIndices,
             allRows: allRows,
             columns: tab.resultColumns,
-            columnTypes: tab.columnTypes
+            columnTypes: columnTypes,
+            externallyModifiedColumns: modifiedColumns
         )
 
         guard isSidebarEditable else {
@@ -907,6 +948,7 @@ private struct ToolbarTintModifier: ViewModifier {
     func body(content: Content) -> some View {
         if connectionColor.isDefault {
             content
+                .toolbarBackground(.hidden, for: .windowToolbar)
         } else {
             content
                 .toolbarBackground(connectionColor.color.opacity(0.12), for: .windowToolbar)
@@ -917,15 +959,15 @@ private struct ToolbarTintModifier: ViewModifier {
 
 // MARK: - Focused Command Actions Modifier
 
-/// Conditionally publishes `MainContentCommandActions` as a focused scene object.
-/// `focusedSceneObject` requires a non-optional value, so this modifier
+/// Conditionally publishes `MainContentCommandActions` as a focused scene value.
+/// `focusedSceneValue` requires a non-optional value, so this modifier
 /// only applies it when the actions object has been created.
 private struct FocusedCommandActionsModifier: ViewModifier {
     let actions: MainContentCommandActions?
 
     func body(content: Content) -> some View {
         if let actions {
-            content.focusedSceneObject(actions)
+            content.focusedSceneValue(\.commandActions, actions)
         } else {
             content
         }

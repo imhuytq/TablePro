@@ -224,12 +224,14 @@ struct SQLDialectFactory {
         switch databaseType {
         case .mysql, .mariadb:
             return MySQLDialect()
-        case .postgresql:
+        case .postgresql, .redshift:
             return PostgreSQLDialect()
         case .sqlite:
             return SQLiteDialect()
         case .mongodb:
             return SQLiteDialect()  // Placeholder until MongoDB dialect is implemented
+        case .redis:
+            return SQLiteDialect()  // Placeholder until Redis dialect is implemented
         }
     }
 }

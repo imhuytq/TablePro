@@ -7,7 +7,7 @@
 //
 
 import Combine
-import os
+import Observation
 import SwiftUI
 
 // MARK: - TableFetcher Protocol
@@ -34,33 +34,38 @@ struct LiveTableFetcher: TableFetcher {
                 return cached
             }
         }
-        guard let driver = await DatabaseManager.shared.driver(for: connectionId) else { return [] }
+        guard let driver = await DatabaseManager.shared.driver(for: connectionId) else {
+            return []
+        }
         return try await driver.fetchTables()
     }
 }
 
 // MARK: - SidebarViewModel
 
-@MainActor
-final class SidebarViewModel: ObservableObject {
-    private static let logger = Logger(subsystem: "com.TablePro", category: "SidebarViewModel")
-
+@MainActor @Observable
+final class SidebarViewModel {
     // MARK: - Published State
 
-    @Published var isLoading = false
-    @Published var errorMessage: String?
-    @Published var searchText = ""
-    @Published var debouncedSearchText = ""
-    @Published var isTablesExpanded: Bool = {
+    var isLoading = false
+    var errorMessage: String?
+    var searchText = "" {
+        didSet { debounceSearchText() }
+    }
+
+    var debouncedSearchText = ""
+    var isTablesExpanded: Bool = {
         let key = "sidebar.isTablesExpanded"
         if UserDefaults.standard.object(forKey: key) != nil {
             return UserDefaults.standard.bool(forKey: key)
         }
         return true
-    }()
-    @Published var showOperationDialog = false
-    @Published var pendingOperationType: TableOperationType?
-    @Published var pendingOperationTables: [String] = []
+    }() {
+        didSet { UserDefaults.standard.set(isTablesExpanded, forKey: "sidebar.isTablesExpanded") }
+    }
+    var showOperationDialog = false
+    var pendingOperationType: TableOperationType?
+    var pendingOperationTables: [String] = []
 
     // MARK: - Internal State
 
@@ -82,6 +87,8 @@ final class SidebarViewModel: ObservableObject {
     private let tableFetcher: TableFetcher
     private var cancellables = Set<AnyCancellable>()
     private var hasSetupNotifications = false
+    private var loadTask: Task<Void, Never>?
+    private var searchDebounceTask: Task<Void, Never>?
 
     // MARK: - Convenience Accessors
 
@@ -131,15 +138,15 @@ final class SidebarViewModel: ObservableObject {
         self.databaseType = databaseType
         self.connectionId = connectionId
         self.tableFetcher = tableFetcher ?? LiveTableFetcher(connectionId: connectionId, schemaProvider: schemaProvider)
+    }
 
-        $searchText
-            .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
-            .assign(to: &$debouncedSearchText)
-
-        $isTablesExpanded
-            .dropFirst()
-            .sink { UserDefaults.standard.set($0, forKey: "sidebar.isTablesExpanded") }
-            .store(in: &cancellables)
+    private func debounceSearchText() {
+        searchDebounceTask?.cancel()
+        searchDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            self?.debouncedSearchText = self?.searchText ?? ""
+        }
     }
 
     // MARK: - Lifecycle
@@ -167,7 +174,7 @@ final class SidebarViewModel: ObservableObject {
         .receive(on: DispatchQueue.main)
         .sink { [weak self] _ in
             Task { @MainActor in
-                self?.loadTables()
+                self?.forceLoadTables()
             }
         }
         .store(in: &cancellables)
@@ -201,13 +208,20 @@ final class SidebarViewModel: ObservableObject {
         guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
-        Task {
+        loadTask = Task {
             await loadTablesAsync()
         }
     }
 
+    func forceLoadTables() {
+        loadTask?.cancel()
+        loadTask = nil
+        isLoading = false
+        loadTables()
+    }
+
     private func loadTablesAsync() async {
-        let previousSelectedName = selectedTables.first?.name
+        let previousSelectedName: String? = tables.isEmpty ? nil : selectedTables.first?.name
 
         do {
             let fetchedTables = try await tableFetcher.fetchTables()

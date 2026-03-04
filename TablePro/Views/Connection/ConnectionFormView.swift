@@ -18,7 +18,7 @@ struct ConnectionFormView: View {
     let connectionId: UUID?
 
     private let storage = ConnectionStorage.shared
-    @ObservedObject private var dbManager = DatabaseManager.shared
+    private let dbManager = DatabaseManager.shared
 
     // Computed property for isNew
     private var isNew: Bool { connectionId == nil }
@@ -197,18 +197,22 @@ struct ConnectionFormView: View {
                         text: $port,
                         prompt: Text(defaultPort)
                     )
-                    TextField(
-                        String(localized: "Database"),
-                        text: $database,
-                        prompt: Text("database_name")
-                    )
+                    if type != .redis {
+                        TextField(
+                            String(localized: "Database"),
+                            text: $database,
+                            prompt: Text("database_name")
+                        )
+                    }
                 }
                 Section(String(localized: "Authentication")) {
-                    TextField(
-                        String(localized: "Username"),
-                        text: $username,
-                        prompt: Text("root")
-                    )
+                    if type != .redis {
+                        TextField(
+                            String(localized: "Username"),
+                            text: $username,
+                            prompt: Text("root")
+                        )
+                    }
                     SecureField(
                         String(localized: "Password"),
                         text: $password
@@ -431,6 +435,20 @@ struct ConnectionFormView: View {
                 }
             }
 
+            if type == .redis {
+                Section("Redis") {
+                    Stepper(
+                        value: Binding(
+                            get: { Int(database) ?? 0 },
+                            set: { database = String($0) }
+                        ),
+                        in: 0...15
+                    ) {
+                        Text(String(localized: "Database Index: \(Int(database) ?? 0)"))
+                    }
+                }
+            }
+
             Section(String(localized: "AI")) {
                 Picker(String(localized: "AI Policy"), selection: $aiPolicy) {
                     Text(String(localized: "Use Default"))
@@ -517,8 +535,10 @@ struct ConnectionFormView: View {
         switch type {
         case .mysql, .mariadb: return "3306"
         case .postgresql: return "5432"
+        case .redshift: return "5439"
         case .sqlite: return ""
         case .mongodb: return "27017"
+        case .redis: return "6379"
         }
     }
 

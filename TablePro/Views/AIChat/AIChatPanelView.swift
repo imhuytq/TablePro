@@ -15,8 +15,8 @@ struct AIChatPanelView: View {
     var currentQuery: String?
     var queryResults: String?
 
-    @ObservedObject var viewModel: AIChatViewModel
-    @ObservedObject private var settingsManager = AppSettingsManager.shared
+    @Bindable var viewModel: AIChatViewModel
+    private let settingsManager = AppSettingsManager.shared
     @State private var isNearBottom: Bool = true
 
     private var hasConfiguredProvider: Bool {
@@ -24,11 +24,19 @@ struct AIChatPanelView: View {
     }
 
     private var queryLanguage: String {
-        connection.type == .mongodb ? "javascript" : "sql"
+        switch connection.type {
+        case .mongodb: return "javascript"
+        case .redis: return "bash"
+        default: return "sql"
+        }
     }
 
     private var queryTypeName: String {
-        connection.type == .mongodb ? "MongoDB query" : "SQL query"
+        switch connection.type {
+        case .mongodb: return "MongoDB query"
+        case .redis: return "Redis command"
+        default: return "SQL query"
+        }
     }
 
     var body: some View {

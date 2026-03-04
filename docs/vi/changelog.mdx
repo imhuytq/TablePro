@@ -4,6 +4,64 @@ description: "Cập nhật sản phẩm và thông báo cho TablePro"
 rss: true
 ---
 
+<Update label="4 tháng 3, 2026" description="v0.13.0">
+  ### Tính năng mới
+
+  - **Hỗ trợ Redis**: Kết nối đến cơ sở dữ liệu Redis với duyệt key-value, thanh bên theo database (db0-db15), quản lý TTL và CLI tương tác
+  - **URL tương thích TablePlus**: Mở cơ sở dữ liệu qua dòng lệnh với `open -a TablePro "postgresql://user@host/db"`, hỗ trợ chuyển schema, mở bảng, bộ lọc, màu sắc và tag môi trường
+
+  ### Sửa lỗi
+
+  - Sửa lỗi màu nền thanh tìm kiếm sidebar và vùng nội dung chính không hòa trộn với vibrancy của macOS
+  - Sửa lỗi cột POINT và geometry hiển thị giá trị trống trong MySQL và nhãn kiểu sai trong thanh bên
+</Update>
+
+<Update label="3 tháng 3, 2026" description="v0.12.0">
+  ### Tính năng mới
+
+  - **Hỗ trợ Amazon Redshift**: Kết nối đến kho dữ liệu Amazon Redshift
+  - **Deep Link**: Mở kết nối, bảng, truy vấn và nhập kết nối qua URL `tablepro://`
+  - **Sao chép dưới dạng URL**: Nhấp chuột phải vào kết nối để sao chép chi tiết dưới dạng chuỗi kết nối (ví dụ: `mysql://user:pass@host/db`)
+  - **Tự động hiện Inspector**: Tự động mở thanh bên phải khi chọn một hàng (Cài đặt > Data Grid)
+  - **Homebrew Cask**: Cài đặt qua `brew install datlechin/tap/tablepro`
+
+  ### Cải tiến
+
+  - Cột ENUM và SET giờ mở picker khi nhấp chuột một lần với biểu tượng mũi tên, giống hành vi cột boolean
+
+  ### Sửa lỗi
+
+  - Sửa lỗi "Table not found" khi chuyển đổi cơ sở dữ liệu trong cùng kết nối (Cmd+K) khi tab bảng đang mở
+  - Sửa lỗi trạng thái thanh bên phải không lưu lại khi chuyển đổi giữa các tab cửa sổ gốc
+</Update>
+
+<Update label="2 tháng 3, 2026" description="v0.11.1">
+  ### Sửa lỗi
+
+  - Sửa lỗi tab MySQL thứ hai hiển thị hàng trống khi macOS gộp nhóm tab
+  - Sửa lỗi tên tab MongoDB hiển thị "MQL Query" thay vì tên collection khi sử dụng cú pháp ngoặc vuông
+</Update>
+
+<Update label="2 tháng 3, 2026" description="v0.11.0">
+  ### Tính năng mới
+
+  - **Chỉ báo màu môi trường**: Thanh công cụ hiển thị màu nhẹ dựa trên màu kết nối để nhận diện môi trường nhanh chóng
+  - **Nhập URL SSH Tunnel**: Nhập kết nối từ URL SSH tunnel (ví dụ: `mysql+ssh://`, `postgresql+ssh://`)
+  - **Nhóm kết nối**: Sắp xếp các kết nối cơ sở dữ liệu vào thư mục với tiêu đề có màu
+
+  ### Cải tiến
+
+  - Thanh công cụ giờ sử dụng overflow gốc của macOS, History/Export/Import chuyển vào menu phụ
+  - Thiết kế lại bảng chi tiết thanh bên phải với bố cục trường gọn gàng và trình chỉnh sửa theo loại dữ liệu
+
+  ### Sửa lỗi
+
+  - Sửa lỗi thanh công cụ hiển thị "MySQL" và thiếu phiên bản khi mở tab mới
+  - Sửa lỗi phím tắt không hoạt động sau khi kết nối từ màn hình chào mừng cho đến khi mở tab thứ hai
+  - Sửa lỗi menu overflow thanh công cụ chỉ hiển thị một mục khi cửa sổ thu hẹp
+  - Sửa lỗi AI chat hiển thị nhãn "SQL" và thiếu syntax highlighting cho code block MongoDB
+</Update>
+
 <Update label="1 tháng 3, 2026" description="v0.10.0">
   ### Tính năng mới
 

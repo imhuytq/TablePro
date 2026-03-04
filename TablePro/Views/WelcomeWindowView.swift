@@ -15,6 +15,7 @@ import SwiftUI
 struct WelcomeWindowView: View {
     private static let logger = Logger(subsystem: "com.TablePro", category: "WelcomeWindowView")
     private let storage = ConnectionStorage.shared
+    private let groupStorage = GroupStorage.shared
     @ObservedObject private var dbManager = DatabaseManager.shared
 
     @State private var connections: [DatabaseConnection] = []
@@ -32,8 +33,6 @@ struct WelcomeWindowView: View {
     @State private var groupToDelete: ConnectionGroup?
     @State private var showDeleteGroupConfirmation = false
     @State private var newGroupParentId: UUID?
-
-    private let groupStorage = GroupStorage.shared
 
     @Environment(\.openWindow) private var openWindow
 
@@ -141,6 +140,7 @@ struct WelcomeWindowView: View {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
                     .frame(width: 80, height: 80)
+                    .shadow(color: Color(red: 1.0, green: 0.576, blue: 0.0).opacity(0.4), radius: 20, x: 0, y: 0)
 
                 VStack(spacing: 6) {
                     Text("TablePro")

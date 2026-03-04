@@ -17,8 +17,14 @@ extension MainContentCoordinator {
     func openTableTab(_ tableName: String, showStructure: Bool = false, isView: Bool = false) {
         // Get current database name from active session (may differ from connection default after Cmd+K switch)
         let currentDatabase: String
-        if let session = DatabaseManager.shared.session(for: connectionId) {
-            currentDatabase = session.connection.database
+        if connection.type == .redis {
+            // Extract db index from table name "db3" → "3"
+            guard tableName.hasPrefix("db"), Int(String(tableName.dropFirst(2))) != nil else {
+                return
+            }
+            currentDatabase = String(tableName.dropFirst(2))
+        } else if let session = DatabaseManager.shared.session(for: connectionId) {
+            currentDatabase = session.activeDatabase
         } else {
             currentDatabase = connection.database
         }
@@ -74,6 +80,25 @@ extension MainContentCoordinator {
             return
         }
 
+        // Redis databases navigate in-place (replace current tab) rather than
+        // opening new native window tabs, matching TablePlus behavior.
+        if connection.type == .redis {
+            if tabManager.replaceTabContent(
+                tableName: tableName,
+                databaseType: .redis,
+                databaseName: currentDatabase
+            ) {
+                if let tabIndex = tabManager.selectedTabIndex {
+                    tabManager.tabs[tabIndex].pagination.reset()
+                    toolbarState.isTableTab = true
+                }
+                if let dbIndex = Int(currentDatabase) {
+                    selectRedisDatabaseAndQuery(dbIndex)
+                }
+            }
+            return
+        }
+
         // If current tab has unsaved changes, open in a new native tab instead of replacing
         if changeManager.hasChanges {
             let payload = EditorTabPayload(
@@ -124,6 +149,27 @@ extension MainContentCoordinator {
             WHERE schemaname = '\(schema)'
             ORDER BY relname
             """
+        case .redshift:
+            let schema: String
+            if let rsDriver = DatabaseManager.shared.driver(for: connectionId) as? RedshiftDriver {
+                schema = rsDriver.escapedSchema
+            } else {
+                schema = "public"
+            }
+            sql = """
+            SELECT
+                schema,
+                "table" as name,
+                'TABLE' as kind,
+                tbl_rows as estimated_rows,
+                size as size_mb,
+                pct_used,
+                unsorted,
+                stats_off
+            FROM svv_table_info
+            WHERE schema = '\(schema)'
+            ORDER BY "table"
+            """
         case .mysql, .mariadb:
             sql = """
             SELECT
@@ -168,6 +214,13 @@ extension MainContentCoordinator {
             )
             runQuery()
             return
+        case .redis:
+            tabManager.addTab(
+                initialQuery: "SCAN 0 MATCH * COUNT 100",
+                databaseName: connection.database
+            )
+            runQuery()
+            return
         }
 
         let payload = EditorTabPayload(
@@ -179,6 +232,18 @@ extension MainContentCoordinator {
     }
 
     // MARK: - Database Switching
+
+    /// Close all sibling native window-tabs except the current key window.
+    /// Each table opened via WindowOpener creates a separate NSWindow in the same
+    /// tab group. Clearing `tabManager.tabs` only affects the in-app state of the
+    /// *current* window — other NSWindows remain open with stale content.
+    private func closeSiblingNativeWindows() {
+        guard let keyWindow = NSApp.keyWindow else { return }
+        let siblings = keyWindow.tabbedWindows ?? []
+        for sibling in siblings where sibling !== keyWindow {
+            sibling.close()
+        }
+    }
 
     /// Switch to a different database (called from database switcher)
     func switchDatabase(to database: String) async {
@@ -196,47 +261,44 @@ extension MainContentCoordinator {
             if connection.type == .mysql || connection.type == .mariadb {
                 _ = try await driver.execute(query: "USE `\(database)`")
 
+                // Also switch metadata driver's database
+                if let metaDriver = DatabaseManager.shared.metadataDriver(for: connectionId) {
+                    _ = try? await metaDriver.execute(query: "USE `\(database)`")
+                }
+
                 // Update session with new database
                 DatabaseManager.shared.updateSession(connectionId) { session in
-                    var updatedConnection = session.connection
-                    updatedConnection.database = database
-                    session.connection = updatedConnection
+                    session.currentDatabase = database
                     session.tables = []          // triggers SidebarView.loadTables() via onChange
                 }
 
                 // Update toolbar state
                 toolbarState.databaseName = database
 
-                // Clear tab results but keep tabs open, update databaseName to new database
-                tabManager.tabs = tabManager.tabs.map { tab in
-                    var updatedTab = tab
-                    updatedTab.resultColumns = []
-                    updatedTab.resultRows = []
-                    updatedTab.resultVersion += 1
-                    updatedTab.errorMessage = nil
-                    updatedTab.executionTime = nil
-                    updatedTab.databaseName = database
-                    return updatedTab
-                }
+                // Close sibling native window-tabs and clear in-app tabs —
+                // previous database's tables/queries are no longer valid
+                closeSiblingNativeWindows()
+                tabManager.tabs = []
+                tabManager.selectedTabId = nil
 
                 // Reload schema for autocomplete.
                 // session.tables was cleared above, which triggers SidebarView.loadTables() via onChange.
                 await loadSchema()
-
-                // Re-execute current tab if it's a table tab.
-                // Do NOT post .refreshAll here — that broadcasts to ALL windows and causes
-                // every window to re-execute its query against the wrong database.
-                if let currentTab = tabManager.selectedTab, currentTab.tabType == .table {
-                    runQuery()
-                }
-            } else if connection.type == .postgresql {
+            } else if connection.type == .postgresql || connection.type == .redshift {
                 // PostgreSQL: switch schema (not database — PG database switching requires reconnection)
-                guard let pgDriver = driver as? PostgreSQLDriver else { return }
-                try await pgDriver.switchSchema(to: database)
+                if let pgDriver = driver as? PostgreSQLDriver {
+                    try await pgDriver.switchSchema(to: database)
+                } else if let rsDriver = driver as? RedshiftDriver {
+                    try await rsDriver.switchSchema(to: database)
+                } else {
+                    return
+                }
 
                 // Also switch metadata driver's schema
-                if let metaDriver = DatabaseManager.shared.metadataDriver(for: connectionId) as? PostgreSQLDriver {
-                    try? await metaDriver.switchSchema(to: database)
+                if let pgMeta = DatabaseManager.shared.metadataDriver(for: connectionId) as? PostgreSQLDriver {
+                    try? await pgMeta.switchSchema(to: database)
+                } else if let rsMeta = DatabaseManager.shared.metadataDriver(for: connectionId) as? RedshiftDriver {
+                    try? await rsMeta.switchSchema(to: database)
                 }
 
                 // Update session
@@ -248,17 +310,11 @@ extension MainContentCoordinator {
                 // Update toolbar state
                 toolbarState.databaseName = database
 
-                // Clear tab results but keep tabs open
-                tabManager.tabs = tabManager.tabs.map { tab in
-                    var updatedTab = tab
-                    updatedTab.resultColumns = []
-                    updatedTab.resultRows = []
-                    updatedTab.resultVersion += 1
-                    updatedTab.errorMessage = nil
-                    updatedTab.executionTime = nil
-                    updatedTab.databaseName = database
-                    return updatedTab
-                }
+                // Close sibling native window-tabs and clear in-app tabs —
+                // previous schema's tables/queries are no longer valid
+                closeSiblingNativeWindows()
+                tabManager.tabs = []
+                tabManager.selectedTabId = nil
 
                 // Reload schema for autocomplete
                 await loadSchema()
@@ -266,38 +322,59 @@ extension MainContentCoordinator {
                 // Force sidebar reload — posting .refreshData ensures loadTables() runs
                 // even when session.tables was already [] (e.g. switching from empty schema back to public)
                 NotificationCenter.default.post(name: .refreshData, object: nil)
-
-                // Re-execute current tab if it's a table tab
-                if let currentTab = tabManager.selectedTab, currentTab.tabType == .table {
-                    runQuery()
-                }
             } else if connection.type == .mongodb {
-                // MongoDB: just update the database name — driver reads it for every operation
+                // MongoDB: update the driver's connection so fetchTables/execute use the new database
+                if let mongoDriver = driver as? MongoDBDriver {
+                    mongoDriver.switchDatabase(to: database)
+                }
+
+                // Also update metadata driver if present
+                if let metaDriver = DatabaseManager.shared.metadataDriver(for: connectionId) as? MongoDBDriver {
+                    metaDriver.switchDatabase(to: database)
+                }
+
                 DatabaseManager.shared.updateSession(connectionId) { session in
-                    var updatedConnection = session.connection
-                    updatedConnection.database = database
-                    session.connection = updatedConnection
+                    session.currentDatabase = database
                     session.tables = []
                 }
 
                 toolbarState.databaseName = database
 
-                tabManager.tabs = tabManager.tabs.map { tab in
-                    var updatedTab = tab
-                    updatedTab.resultColumns = []
-                    updatedTab.resultRows = []
-                    updatedTab.resultVersion += 1
-                    updatedTab.errorMessage = nil
-                    updatedTab.executionTime = nil
-                    updatedTab.databaseName = database
-                    return updatedTab
-                }
+                // Close sibling native window-tabs and clear in-app tabs —
+                // previous database's collections are no longer valid
+                closeSiblingNativeWindows()
+                tabManager.tabs = []
+                tabManager.selectedTabId = nil
 
                 await loadSchema()
 
-                if let currentTab = tabManager.selectedTab, currentTab.tabType == .table {
-                    runQuery()
+                NotificationCenter.default.post(name: .refreshData, object: nil)
+            } else if connection.type == .redis {
+                // Redis: SELECT <db index> to switch logical database
+                guard let dbIndex = Int(database) else { return }
+
+                if let redisDriver = driver as? RedisDriver {
+                    try await redisDriver.selectDatabase(dbIndex)
                 }
+
+                if let metaRedisDriver = DatabaseManager.shared.metadataDriver(for: connectionId) as? RedisDriver {
+                    try? await metaRedisDriver.selectDatabase(dbIndex)
+                }
+
+                DatabaseManager.shared.updateSession(connectionId) { session in
+                    session.currentDatabase = database
+                    session.tables = []
+                }
+
+                toolbarState.databaseName = database
+
+                closeSiblingNativeWindows()
+                tabManager.tabs = []
+                tabManager.selectedTabId = nil
+
+                await loadSchema()
+
+                NotificationCenter.default.post(name: .refreshData, object: nil)
             }
         } catch {
             navigationLogger.error("Failed to switch database: \(error.localizedDescription, privacy: .public)")
@@ -306,6 +383,34 @@ extension MainContentCoordinator {
                 message: error.localizedDescription,
                 window: NSApplication.shared.keyWindow
             )
+        }
+    }
+
+    // MARK: - Redis Database Selection
+
+    /// Select a Redis database index and then run the query.
+    /// Redis sidebar clicks go through openTableTab (sync), so we need a Task
+    /// to call the async selectDatabase before executing the query.
+    private func selectRedisDatabaseAndQuery(_ dbIndex: Int) {
+        let connId = connectionId
+        let database = String(dbIndex)
+        Task { @MainActor in
+            do {
+                if let redisDriver = DatabaseManager.shared.driver(for: connId) as? RedisDriver {
+                    try await redisDriver.selectDatabase(dbIndex)
+                }
+            } catch {
+                navigationLogger.error("Failed to SELECT Redis db\(dbIndex): \(error.localizedDescription, privacy: .public)")
+                return
+            }
+            if let metaRedisDriver = DatabaseManager.shared.metadataDriver(for: connId) as? RedisDriver {
+                try? await metaRedisDriver.selectDatabase(dbIndex)
+            }
+            DatabaseManager.shared.updateSession(connId) { session in
+                session.currentDatabase = database
+            }
+            toolbarState.databaseName = database
+            executeTableTabQueryDirectly()
         }
     }
 }

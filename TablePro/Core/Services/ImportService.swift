@@ -6,8 +6,8 @@
 //  and foreign key handling.
 //
 
-import Combine
 import Foundation
+import Observation
 import os
 
 // MARK: - Import State
@@ -27,12 +27,12 @@ struct ImportState {
 // MARK: - Import Service
 
 /// Service responsible for importing SQL files
-@MainActor
-final class ImportService: ObservableObject {
+@MainActor @Observable
+final class ImportService {
     private static let logger = Logger(subsystem: "com.TablePro", category: "ImportService")
     // MARK: - Published State
 
-    @Published var state = ImportState()
+    var state = ImportState()
 
     // MARK: - Cancellation
 
@@ -288,12 +288,12 @@ final class ImportService: ObservableObject {
         switch dbType {
         case .mysql, .mariadb:
             return ["SET FOREIGN_KEY_CHECKS=0"]
-        case .postgresql:
+        case .postgresql, .redshift:
             // PostgreSQL doesn't support globally disabling non-deferrable FKs.
             return []
         case .sqlite:
             return ["PRAGMA foreign_keys = OFF"]
-        case .mongodb:
+        case .mongodb, .redis:
             return []
         }
     }
@@ -302,11 +302,11 @@ final class ImportService: ObservableObject {
         switch dbType {
         case .mysql, .mariadb:
             return ["SET FOREIGN_KEY_CHECKS=1"]
-        case .postgresql:
+        case .postgresql, .redshift:
             return []
         case .sqlite:
             return ["PRAGMA foreign_keys = ON"]
-        case .mongodb:
+        case .mongodb, .redis:
             return []
         }
     }
@@ -315,16 +315,16 @@ final class ImportService: ObservableObject {
         switch dbType {
         case .mysql, .mariadb:
             return "START TRANSACTION"
-        case .postgresql, .sqlite:
+        case .postgresql, .redshift, .sqlite:
             return "BEGIN"
-        case .mongodb:
+        case .mongodb, .redis:
             return ""
         }
     }
 
     private func commitStatement(for dbType: DatabaseType) -> String {
         switch dbType {
-        case .mongodb:
+        case .mongodb, .redis:
             return ""
         default:
             return "COMMIT"
@@ -333,7 +333,7 @@ final class ImportService: ObservableObject {
 
     private func rollbackStatement(for dbType: DatabaseType) -> String {
         switch dbType {
-        case .mongodb:
+        case .mongodb, .redis:
             return ""
         default:
             return "ROLLBACK"

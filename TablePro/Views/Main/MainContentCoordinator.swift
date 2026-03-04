@@ -7,8 +7,8 @@
 //
 
 import CodeEditSourceEditor
-import Combine
 import Foundation
+import Observation
 import os
 import SwiftUI
 
@@ -36,8 +36,8 @@ enum ActiveSheet: Identifiable {
 }
 
 /// Coordinator managing MainContentView business logic
-@MainActor
-final class MainContentCoordinator: ObservableObject {
+@MainActor @Observable
+final class MainContentCoordinator {
     private static let logger = Logger(subsystem: "com.TablePro", category: "MainContentCoordinator")
 
     /// Per-connection shared schema providers so new tabs skip redundant schema loads
@@ -64,29 +64,29 @@ final class MainContentCoordinator: ObservableObject {
 
     internal let queryBuilder: TableQueryBuilder
     let tabPersistence: TabPersistenceService
-    internal lazy var rowOperationsManager: RowOperationsManager = {
+    @ObservationIgnored internal lazy var rowOperationsManager: RowOperationsManager = {
         RowOperationsManager(changeManager: changeManager)
     }()
 
     // MARK: - Published State
 
-    @Published var schemaProvider: SQLSchemaProvider
-    @Published var cursorPositions: [CursorPosition] = []
-    @Published var tableMetadata: TableMetadata?
+    var schemaProvider: SQLSchemaProvider
+    var cursorPositions: [CursorPosition] = []
+    var tableMetadata: TableMetadata?
     // Removed: showErrorAlert and errorAlertMessage - errors now display inline
-    @Published var activeSheet: ActiveSheet?
-    @Published var importFileURL: URL?
-    @Published var needsLazyLoad = false
+    var activeSheet: ActiveSheet?
+    var importFileURL: URL?
+    var needsLazyLoad = false
 
     /// Cache for async-sorted query tab rows (large datasets sorted on background thread)
-    @Published private(set) var querySortCache: [UUID: QuerySortCacheEntry] = [:]
+    private(set) var querySortCache: [UUID: QuerySortCacheEntry] = [:]
 
     // MARK: - Internal State
 
-    internal var queryGeneration: Int = 0
-    internal var currentQueryTask: Task<Void, Never>?
-    private var changeManagerUpdateTask: Task<Void, Never>?
-    private var activeSortTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored internal var queryGeneration: Int = 0
+    @ObservationIgnored internal var currentQueryTask: Task<Void, Never>?
+    @ObservationIgnored private var changeManagerUpdateTask: Task<Void, Never>?
+    @ObservationIgnored private var activeSortTasks: [UUID: Task<Void, Never>] = [:]
 
     /// Set during handleTabChange to suppress redundant onChange(of: resultColumns) reconfiguration
     internal var isHandlingTabSwitch = false
@@ -96,7 +96,7 @@ final class MainContentCoordinator: ObservableObject {
     var isSwitchingDatabase = false
 
     /// Tracks whether teardown() was called; used by deinit to log missed teardowns
-    private var didTeardown = false
+    @ObservationIgnored private var didTeardown = false
 
     /// Remove sort cache entries for tabs that no longer exist
     func cleanupSortCache(openTabIds: Set<UUID>) {
@@ -136,6 +136,7 @@ final class MainContentCoordinator: ObservableObject {
         }
 
         Self.retainSchemaProvider(for: connection.id)
+        setupURLNotificationObservers()
     }
 
     /// Explicit cleanup called from `onDisappear`. Releases schema provider
@@ -246,6 +247,11 @@ final class MainContentCoordinator: ObservableObject {
 
     private static let mongoCollectionRegex = try? NSRegularExpression(
         pattern: #"^\s*db\.(\w+)\."#,
+        options: []
+    )
+
+    private static let mongoBracketCollectionRegex = try? NSRegularExpression(
+        pattern: #"^\s*db\["([^"]+)"\]"#,
         options: []
     )
 
@@ -368,10 +374,12 @@ final class MainContentCoordinator: ObservableObject {
         switch connection.type {
         case .sqlite:
             explainSQL = "EXPLAIN QUERY PLAN \(stmt)"
-        case .mysql, .mariadb, .postgresql:
+        case .mysql, .mariadb, .postgresql, .redshift:
             explainSQL = "EXPLAIN \(stmt)"
         case .mongodb:
             explainSQL = Self.buildMongoExplain(for: stmt)
+        case .redis:
+            explainSQL = Self.buildRedisDebugCommand(for: stmt)
         }
 
         Task { @MainActor in
@@ -410,8 +418,15 @@ final class MainContentCoordinator: ObservableObject {
             effectiveSQL = sql
         }
 
-        let tableName = extractTableName(from: effectiveSQL)
-        let isEditable = tableName != nil
+        let tableName: String?
+        let isEditable: Bool
+        if connection.type == .redis {
+            tableName = tabManager.selectedTab?.tableName
+            isEditable = tableName != nil
+        } else {
+            tableName = extractTableName(from: effectiveSQL)
+            isEditable = tableName != nil
+        }
 
         currentQueryTask = Task { [weak self] in
             guard let self else { return }
@@ -422,7 +437,8 @@ final class MainContentCoordinator: ObservableObject {
                 var needsMetadataFetch = false
 
                 if isEditable, let tableName = tableName {
-                    needsMetadataFetch = !isMetadataCached(tabId: tabId, tableName: tableName)
+                    let cached = isMetadataCached(tabId: tabId, tableName: tableName)
+                    needsMetadataFetch = !cached
 
                     // If metadata is NOT cached and a dedicated metadata driver exists,
                     // start fetching columns+FKs on the separate connection so it runs
@@ -621,7 +637,14 @@ final class MainContentCoordinator: ObservableObject {
             return String(sql[range])
         }
 
-        // MQL: db.collectionName.find(...)
+        // MQL bracket notation: db["collectionName"].find(...)
+        if let regex = Self.mongoBracketCollectionRegex,
+           let match = regex.firstMatch(in: sql, options: [], range: nsRange),
+           let range = Range(match.range(at: 1), in: sql) {
+            return String(sql[range])
+        }
+
+        // MQL dot notation: db.collectionName.find(...)
         if let regex = Self.mongoCollectionRegex,
            let match = regex.firstMatch(in: sql, options: [], range: nsRange),
            let range = Range(match.range(at: 1), in: sql) {
@@ -1245,9 +1268,22 @@ private extension MainContentCoordinator {
             return false
         }
         let tab = tabManager.tabs[idx]
-        return tab.tableName == tableName
-            && !tab.columnDefaults.isEmpty
-            && tab.primaryKeyColumn != nil
+        guard tab.tableName == tableName,
+              !tab.columnDefaults.isEmpty,
+              tab.primaryKeyColumn != nil else {
+            return false
+        }
+        // Ensure every ENUM/SET column has its allowed values loaded
+        let enumSetColumnNames: [String] = tab.resultColumns.enumerated().compactMap { i, name in
+            guard i < tab.columnTypes.count,
+                  tab.columnTypes[i].isEnumType || tab.columnTypes[i].isSetType else { return nil }
+            return name
+        }
+        if !enumSetColumnNames.isEmpty,
+           !enumSetColumnNames.allSatisfy({ tab.columnEnumValues[$0] != nil }) {
+            return false
+        }
+        return true
     }
 
     /// Await schema metadata from parallel task or fall back to sequential fetch
@@ -1299,6 +1335,14 @@ private extension MainContentCoordinator {
         updatedTab.lastExecutedAt = Date()
         updatedTab.tableName = tableName
         updatedTab.isEditable = isEditable && updatedTab.isEditable
+        if conn.type == .redis {
+            // Populate enum values from column types for the enum popover
+            for (index, colType) in (updatedTab.columnTypes ?? []).enumerated() {
+                if case .enumType(_, let values) = colType, let vals = values, index < updatedTab.resultColumns.count {
+                    updatedTab.columnEnumValues[updatedTab.resultColumns[index]] = vals
+                }
+            }
+        }
 
         // Merge FK metadata into the same update if available
         if let metadata {
@@ -1328,6 +1372,17 @@ private extension MainContentCoordinator {
                     columns: columns,
                     primaryKeyColumn: pk,
                     databaseType: conn.type
+                )
+            }
+        } else if conn.type == .redis, isEditable {
+            tabManager.tabs[idx].primaryKeyColumn = "Key"
+
+            if tabManager.selectedTabId == tabId {
+                changeManager.configureForTable(
+                    tableName: tableName ?? "",
+                    columns: columns,
+                    primaryKeyColumn: "Key",
+                    databaseType: .redis
                 )
             }
         }
@@ -1381,7 +1436,6 @@ private extension MainContentCoordinator {
         }
 
         // Phase 2b: Fetch enum/set values
-        guard let schema = schemaResult else { return }
         let enumDriver = DatabaseManager.shared.metadataDriver(for: connectionId)
             ?? DatabaseManager.shared.driver(for: connectionId)
         guard let enumDriver else { return }
@@ -1389,20 +1443,36 @@ private extension MainContentCoordinator {
         Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(nanoseconds: 200_000_000)
+
+            // Use schema if available, otherwise fetch column info for enum parsing
+            let columnInfo: [ColumnInfo]
+            if let schema = schemaResult {
+                columnInfo = schema.columnInfo
+            } else {
+                do {
+                    columnInfo = try await enumDriver.fetchColumns(table: tableName)
+                } catch {
+                    columnInfo = []
+                }
+            }
+
             let columnEnumValues = await self.fetchEnumValues(
-                columnInfo: schema.columnInfo,
+                columnInfo: columnInfo,
                 tableName: tableName,
                 driver: enumDriver,
                 connectionType: connectionType
             )
 
-            guard !columnEnumValues.isEmpty else { return }
+            guard !columnEnumValues.isEmpty else {
+                return
+            }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 guard capturedGeneration == queryGeneration else { return }
                 guard !Task.isCancelled else { return }
                 if let idx = tabManager.tabs.firstIndex(where: { $0.id == tabId }) {
                     tabManager.tabs[idx].columnEnumValues = columnEnumValues
+                    tabManager.tabs[idx].metadataVersion += 1
                 }
             }
         }

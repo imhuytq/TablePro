@@ -5,8 +5,8 @@
 //  Created by Ngo Quoc Dat on 16/12/25.
 //
 
-import Combine
 import Foundation
+import Observation
 import os
 
 extension Notification.Name {
@@ -14,16 +14,22 @@ extension Notification.Name {
 }
 
 /// Manages database connections and active drivers
-@MainActor
-final class DatabaseManager: ObservableObject {
+@MainActor @Observable
+final class DatabaseManager {
     static let shared = DatabaseManager()
     private static let logger = Logger(subsystem: "com.TablePro", category: "DatabaseManager")
 
     /// All active connection sessions
-    @Published private(set) var activeSessions: [UUID: ConnectionSession] = [:]
+    private(set) var activeSessions: [UUID: ConnectionSession] = [:] {
+        didSet { sessionVersion &+= 1 }
+    }
+
+    /// Monotonically increasing counter; incremented on every mutation of activeSessions.
+    /// Used by views for `.onChange` since `[UUID: ConnectionSession]` is not `Equatable`.
+    private(set) var sessionVersion: Int = 0
 
     /// Currently selected session ID (displayed in UI)
-    @Published private(set) var currentSessionId: UUID?
+    private(set) var currentSessionId: UUID?
 
     /// Health monitors for active connections (MySQL/PostgreSQL only)
     private var healthMonitors: [UUID: ConnectionHealthMonitor] = [:]
@@ -128,9 +134,18 @@ final class DatabaseManager: ObservableObject {
                 try await driver.applyQueryTimeout(timeoutSeconds)
             }
 
-            // Initialize schema for PostgreSQL connections
+            // Initialize schema for PostgreSQL/Redshift connections
             if let pgDriver = driver as? PostgreSQLDriver {
                 activeSessions[connection.id]?.currentSchema = pgDriver.currentSchema
+            } else if let rsDriver = driver as? RedshiftDriver {
+                activeSessions[connection.id]?.currentSchema = rsDriver.currentSchema
+            } else if connection.type == .redis {
+                // Redis defaults to db0 on connect; SELECT the configured database if non-default
+                let initialDb = connection.redisDatabase ?? Int(connection.database) ?? 0
+                if initialDb != 0 {
+                    try? await (driver as? RedisDriver)?.selectDatabase(initialDb)
+                }
+                activeSessions[connection.id]?.currentDatabase = String(initialDb)
             }
 
             // Batch all session mutations into a single write to fire objectWillChange once
@@ -176,11 +191,13 @@ final class DatabaseManager: ObservableObject {
                     if metaTimeout > 0 {
                         try? await metaDriver.applyQueryTimeout(metaTimeout)
                     }
-                    // Sync schema on metadata driver for PostgreSQL
-                    if let pgMetaDriver = metaDriver as? PostgreSQLDriver,
-                        let savedSchema = self.activeSessions[metaConnectionId]?.currentSchema
-                    {
-                        try? await pgMetaDriver.switchSchema(to: savedSchema)
+                    // Sync schema on metadata driver for PostgreSQL/Redshift
+                    if let savedSchema = self.activeSessions[metaConnectionId]?.currentSchema {
+                        if let pgMetaDriver = metaDriver as? PostgreSQLDriver {
+                            try? await pgMetaDriver.switchSchema(to: savedSchema)
+                        } else if let rsMetaDriver = metaDriver as? RedshiftDriver {
+                            try? await rsMetaDriver.switchSchema(to: savedSchema)
+                        }
                     }
                     activeSessions[metaConnectionId]?.metadataDriver = metaDriver
                 } catch {
@@ -521,11 +538,13 @@ final class DatabaseManager: ObservableObject {
             try await driver.applyQueryTimeout(timeoutSeconds)
         }
 
-        // Restore schema for PostgreSQL if session had a non-default schema
-        if let pgDriver = driver as? PostgreSQLDriver,
-            let savedSchema = session.currentSchema
-        {
-            try? await pgDriver.switchSchema(to: savedSchema)
+        // Restore schema for PostgreSQL/Redshift if session had a non-default schema
+        if let savedSchema = session.currentSchema {
+            if let pgDriver = driver as? PostgreSQLDriver {
+                try? await pgDriver.switchSchema(to: savedSchema)
+            } else if let rsDriver = driver as? RedshiftDriver {
+                try? await rsDriver.switchSchema(to: savedSchema)
+            }
         }
 
         return driver
@@ -587,11 +606,13 @@ final class DatabaseManager: ObservableObject {
                 try await driver.applyQueryTimeout(timeoutSeconds)
             }
 
-            // Restore schema for PostgreSQL if session had a non-default schema
-            if let pgDriver = driver as? PostgreSQLDriver,
-                let savedSchema = activeSessions[sessionId]?.currentSchema
-            {
-                try? await pgDriver.switchSchema(to: savedSchema)
+            // Restore schema for PostgreSQL/Redshift if session had a non-default schema
+            if let savedSchema = activeSessions[sessionId]?.currentSchema {
+                if let pgDriver = driver as? PostgreSQLDriver {
+                    try? await pgDriver.switchSchema(to: savedSchema)
+                } else if let rsDriver = driver as? RedshiftDriver {
+                    try? await rsDriver.switchSchema(to: savedSchema)
+                }
             }
 
             // Update session
@@ -614,10 +635,12 @@ final class DatabaseManager: ObservableObject {
                         try? await metaDriver.applyQueryTimeout(metaTimeout)
                     }
                     // Restore schema on metadata driver too
-                    if let pgMetaDriver = metaDriver as? PostgreSQLDriver,
-                        let savedSchema = self.activeSessions[metaConnectionId]?.currentSchema
-                    {
-                        try? await pgMetaDriver.switchSchema(to: savedSchema)
+                    if let savedSchema = self.activeSessions[metaConnectionId]?.currentSchema {
+                        if let pgMetaDriver = metaDriver as? PostgreSQLDriver {
+                            try? await pgMetaDriver.switchSchema(to: savedSchema)
+                        } else if let rsMetaDriver = metaDriver as? RedshiftDriver {
+                            try? await rsMetaDriver.switchSchema(to: savedSchema)
+                        }
                     }
                     activeSessions[metaConnectionId]?.metadataDriver = metaDriver
                 } catch {
@@ -751,7 +774,7 @@ final class DatabaseManager: ObservableObject {
         driver: DatabaseDriver
     ) async -> String? {
         // Only needed for PostgreSQL PK modifications
-        guard databaseType == .postgresql else { return nil }
+        guard databaseType == .postgresql || databaseType == .redshift else { return nil }
         guard
             changes.contains(where: {
                 if case .modifyPrimaryKey = $0 { return true }
@@ -763,7 +786,14 @@ final class DatabaseManager: ObservableObject {
 
         // Query the actual constraint name from pg_constraint
         let escapedTable = tableName.replacingOccurrences(of: "'", with: "''")
-        let schema = (driver as? PostgreSQLDriver)?.escapedSchema ?? "public"
+        let schema: String
+        if let pgDriver = driver as? PostgreSQLDriver {
+            schema = pgDriver.escapedSchema
+        } else if let rsDriver = driver as? RedshiftDriver {
+            schema = rsDriver.escapedSchema
+        } else {
+            schema = "public"
+        }
         let query = """
             SELECT con.conname
             FROM pg_constraint con

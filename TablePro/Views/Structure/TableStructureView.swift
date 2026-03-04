@@ -34,8 +34,8 @@ struct TableStructureView: View {
     @AppStorage("skipSchemaPreview") private var skipSchemaPreview = false
 
     // DataGridView state
-    @StateObject private var structureChangeManager = StructureChangeManager()
-    @StateObject private var wrappedChangeManager: AnyChangeManager
+    @State private var structureChangeManager = StructureChangeManager()
+    @State private var wrappedChangeManager: AnyChangeManager
     @State private var selectedRows: Set<Int> = []
     @State private var sortState = SortState()
     @State private var editingCell: CellPosition?
@@ -48,8 +48,8 @@ struct TableStructureView: View {
 
         // Initialize wrappedChangeManager using the StateObject's wrappedValue
         let manager = StructureChangeManager()
-        _structureChangeManager = StateObject(wrappedValue: manager)
-        _wrappedChangeManager = StateObject(wrappedValue: AnyChangeManager(structureManager: manager))
+        _structureChangeManager = State(wrappedValue: manager)
+        _wrappedChangeManager = State(wrappedValue: AnyChangeManager(structureManager: manager))
     }
 
     var body: some View {
@@ -588,6 +588,10 @@ struct TableStructureView: View {
         if driver is MySQLDriver {
             return .mysql
         } else if driver is PostgreSQLDriver {
+            // Redshift uses PostgreSQLDriver; differentiate by connection type
+            if connection.type == .redshift {
+                return .redshift
+            }
             return .postgresql
         } else if driver is SQLiteDriver {
             return .sqlite

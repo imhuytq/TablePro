@@ -6,33 +6,35 @@
 //
 
 import CodeEditTextView
-import Combine
+import Observation
 import Sparkle
 import SwiftUI
 
 // MARK: - App State for Menu Commands
 
 @MainActor
-final class AppState: ObservableObject {
+@Observable
+final class AppState {
     static let shared = AppState()
-    @Published var isConnected: Bool = false
-    @Published var isReadOnly: Bool = false  // True when current connection is read-only
-    @Published var isMongoDB: Bool = false
-    @Published var isCurrentTabEditable: Bool = false  // True when current tab is an editable table
-    @Published var hasRowSelection: Bool = false  // True when rows are selected in data grid
-    @Published var hasTableSelection: Bool = false  // True when tables are selected in sidebar
-    @Published var isHistoryPanelVisible: Bool = false  // Global history panel visibility
-    @Published var hasQueryText: Bool = false  // True when current editor has non-empty query
-    @Published var hasStructureChanges: Bool = false  // True when structure view has pending schema changes
+    var isConnected: Bool = false
+    var isReadOnly: Bool = false  // True when current connection is read-only
+    var isMongoDB: Bool = false
+    var isRedis: Bool = false
+    var isCurrentTabEditable: Bool = false  // True when current tab is an editable table
+    var hasRowSelection: Bool = false  // True when rows are selected in data grid
+    var hasTableSelection: Bool = false  // True when tables are selected in sidebar
+    var isHistoryPanelVisible: Bool = false  // Global history panel visibility
+    var hasQueryText: Bool = false  // True when current editor has non-empty query
+    var hasStructureChanges: Bool = false  // True when structure view has pending schema changes
 }
 
 // MARK: - Pasteboard Commands
 
 /// Custom Commands struct for pasteboard operations
 struct PasteboardCommands: Commands {
-    @ObservedObject var appState: AppState
-    @ObservedObject var settingsManager: AppSettingsManager
-    @FocusedObject var actions: MainContentCommandActions?
+    var appState: AppState
+    var settingsManager: AppSettingsManager
+    @FocusedValue(\.commandActions) var actions: MainContentCommandActions?
 
     /// Build a SwiftUI KeyboardShortcut from keyboard settings
     private func shortcut(for action: ShortcutAction) -> KeyboardShortcut? {
@@ -110,10 +112,10 @@ struct PasteboardCommands: Commands {
 /// All menu commands extracted into a separate Commands struct so that AppState
 /// changes only re-evaluate the menu items — NOT the Scene body / WindowGroups.
 struct AppMenuCommands: Commands {
-    @ObservedObject var appState: AppState
-    @ObservedObject var settingsManager: AppSettingsManager
+    var appState: AppState
+    var settingsManager: AppSettingsManager
     var updaterBridge: UpdaterBridge
-    @FocusedObject var actions: MainContentCommandActions?
+    @FocusedValue(\.commandActions) var actions: MainContentCommandActions?
 
     private func shortcut(for action: ShortcutAction) -> KeyboardShortcut? {
         settingsManager.keyboard.keyboardShortcut(for: action)
@@ -136,7 +138,7 @@ struct AppMenuCommands: Commands {
         //    - Standard actions: copy, paste, undo, delete, cancelOperation (ESC)
         //    - Context-aware: First responder handles action appropriately
         //
-        // 2. **@FocusedObject** (Menu → single handler):
+        // 2. **@FocusedValue** (Menu → single handler):
         //    - Most menu commands call MainContentCommandActions directly
         //    - Clean method calls, no global event bus
         //
@@ -168,13 +170,13 @@ struct AppMenuCommands: Commands {
                 actions?.openDatabaseSwitcher()
             }
             .optionalKeyboardShortcut(shortcut(for: .openDatabase))
-            .disabled(!appState.isConnected)
+            .disabled(!appState.isConnected || appState.isRedis)
 
             Button("Switch Connection...") {
                 NotificationCenter.default.post(name: .openConnectionSwitcher, object: nil)
             }
             .optionalKeyboardShortcut(shortcut(for: .switchConnection))
-            .disabled(!appState.isConnected)
+            .disabled(!appState.isConnected || appState.isRedis)
 
             Divider()
 
@@ -184,7 +186,7 @@ struct AppMenuCommands: Commands {
             .optionalKeyboardShortcut(shortcut(for: .saveChanges))
             .disabled(!appState.isConnected || appState.isReadOnly)
 
-            Button(appState.isMongoDB ? "Preview MQL" : "Preview SQL") {
+            Button(appState.isMongoDB ? "Preview MQL" : appState.isRedis ? "Preview Commands" : "Preview SQL") {
                 actions?.previewSQL()
             }
             .optionalKeyboardShortcut(shortcut(for: .previewSQL))
@@ -221,7 +223,7 @@ struct AppMenuCommands: Commands {
             .optionalKeyboardShortcut(shortcut(for: .export))
             .disabled(!appState.isConnected)
 
-            if !appState.isMongoDB {
+            if !appState.isMongoDB && !appState.isRedis {
                 Button("Import...") {
                     actions?.importTables()
                 }
@@ -373,8 +375,8 @@ struct TableProApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self)
     var appDelegate
 
-    @StateObject private var settingsManager = AppSettingsManager.shared
-    @StateObject private var updaterBridge = UpdaterBridge()
+    @State private var settingsManager = AppSettingsManager.shared
+    @State private var updaterBridge = UpdaterBridge()
 
     init() {
         // Perform startup cleanup of query history if auto-cleanup is enabled
@@ -411,7 +413,7 @@ struct TableProApp: App {
         // Each native window-tab gets its own ContentView with independent state.
         WindowGroup(id: "main", for: EditorTabPayload.self) { $payload in
             ContentView(payload: payload)
-                .environmentObject(AppState.shared)
+                .environment(AppState.shared)
                 .background(OpenWindowHandler())
                 .tint(accentTint)
         }
@@ -421,7 +423,7 @@ struct TableProApp: App {
         // Settings Window - opens with Cmd+,
         Settings {
             SettingsView()
-                .environmentObject(updaterBridge)
+                .environment(updaterBridge)
                 .tint(accentTint)
         }
 
@@ -490,6 +492,10 @@ extension Notification.Name {
     static let openMainWindow = Notification.Name("openMainWindow")
     static let openWelcomeWindow = Notification.Name("openWelcomeWindow")
 
+    // Database URL handling notifications
+    static let switchSchemaFromURL = Notification.Name("switchSchemaFromURL")
+    static let applyURLFilter = Notification.Name("applyURLFilter")
+
     // License notifications
     static let licenseStatusDidChange = Notification.Name("licenseStatusDidChange")
 }
@@ -498,7 +504,7 @@ extension Notification.Name {
 
 /// Menu bar button that triggers Sparkle update check
 struct CheckForUpdatesView: View {
-    @ObservedObject var updaterBridge: UpdaterBridge
+    var updaterBridge: UpdaterBridge
 
     var body: some View {
         Button("Check for Updates...") {
