@@ -16,6 +16,7 @@ struct ConnectionGroupFormSheet: View {
     @State private var name: String = ""
     @State private var color: ConnectionColor = .blue
     @State private var selectedParentId: UUID?
+    @State private var allGroups: [ConnectionGroup] = []
 
     private let groupStorage = GroupStorage.shared
 
@@ -31,7 +32,6 @@ struct ConnectionGroupFormSheet: View {
 
     /// All groups excluding self and descendants when editing
     private var availableGroups: [ConnectionGroup] {
-        let allGroups = groupStorage.loadGroups()
         guard let editingGroup = group else { return allGroups }
         let excludedIds = groupStorage.collectDescendantIds(of: editingGroup.id, in: allGroups)
             .union([editingGroup.id])
@@ -80,6 +80,7 @@ struct ConnectionGroupFormSheet: View {
         }
         .frame(width: 360)
         .onAppear {
+            allGroups = groupStorage.loadGroups()
             if let group {
                 name = group.name
                 color = group.color

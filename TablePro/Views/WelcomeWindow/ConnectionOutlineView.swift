@@ -949,7 +949,6 @@ extension ConnectionOutlineView {
             targetItem: Any?,
             childIndex: Int
         ) -> Bool {
-            // Single connection: use existing logic
             if connections.count == 1 {
                 return acceptConnectionDrop(
                     connection: connections[0],
@@ -961,16 +960,30 @@ extension ConnectionOutlineView {
             let draggedIds = Set(connections.map(\.id))
             let targetGroupId: UUID? = (targetItem as? OutlineGroup)?.group.id
 
-            // Get existing siblings excluding dragged items
             var siblings = parent.connections
                 .filter { $0.groupId == targetGroupId && !draggedIds.contains($0.id) }
                 .sorted { $0.sortOrder < $1.sortOrder }
 
-            // Append all dragged connections at the end
-            for var conn in connections {
-                conn.groupId = targetGroupId
-                conn.sortOrder = (siblings.last?.sortOrder ?? -1) + 1
-                siblings.append(conn)
+            // Prepare dragged connections with updated groupId
+            let movedConns: [DatabaseConnection] = connections.map { conn in
+                var moved = conn
+                moved.groupId = targetGroupId
+                return moved
+            }
+
+            if childIndex == NSOutlineViewDropOnItemIndex {
+                // Dropped ON target: append at end
+                siblings.append(contentsOf: movedConns)
+            } else {
+                // Dropped at specific position: compute insertion index
+                let groupCount: Int
+                if let targetGroup = targetItem as? OutlineGroup {
+                    groupCount = childrenMap[targetGroup.group.id]?.compactMap({ $0 as? OutlineGroup }).count ?? 0
+                } else {
+                    groupCount = rootItems.compactMap { $0 as? OutlineGroup }.count
+                }
+                let insertAt = min(max(0, childIndex - groupCount), siblings.count)
+                siblings.insert(contentsOf: movedConns, at: insertAt)
             }
 
             // Renumber

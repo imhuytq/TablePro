@@ -28,11 +28,24 @@ final class GroupStorage {
         }
 
         do {
-            return try decoder.decode([ConnectionGroup].self, from: data)
+            var groups = try decoder.decode([ConnectionGroup].self, from: data)
+            migrateSortOrderIfNeeded(&groups)
+            return groups
         } catch {
             Self.logger.error("Failed to load groups: \(error)")
             return []
         }
+    }
+
+    /// Assign sequential sortOrder when all items have default 0 (legacy migration).
+    private func migrateSortOrderIfNeeded(_ groups: inout [ConnectionGroup]) {
+        guard groups.count > 1, groups.allSatisfy({ $0.sortOrder == 0 }) else { return }
+        for index in groups.indices {
+            groups[index].sortOrder = index
+        }
+        saveGroups(groups)
+        let count = groups.count
+        Self.logger.info("Migrated sortOrder for \(count) groups")
     }
 
     /// Save all groups

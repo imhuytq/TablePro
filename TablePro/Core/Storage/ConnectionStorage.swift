@@ -37,9 +37,10 @@ final class ConnectionStorage {
         do {
             let storedConnections = try decoder.decode([StoredConnection].self, from: data)
 
-            let connections = storedConnections.map { stored in
+            var connections = storedConnections.map { stored in
                 stored.toConnection()
             }
+            migrateSortOrderIfNeeded(&connections)
             cachedConnections = connections
             return connections
         } catch {
@@ -60,6 +61,17 @@ final class ConnectionStorage {
         } catch {
             Self.logger.error("Failed to save connections: \(error)")
         }
+    }
+
+    /// Assign sequential sortOrder when all items have default 0 (legacy migration).
+    private func migrateSortOrderIfNeeded(_ connections: inout [DatabaseConnection]) {
+        guard connections.count > 1, connections.allSatisfy({ $0.sortOrder == 0 }) else { return }
+        for index in connections.indices {
+            connections[index].sortOrder = index
+        }
+        saveConnections(connections)
+        let count = connections.count
+        Self.logger.info("Migrated sortOrder for \(count) connections")
     }
 
     /// Add a new connection
