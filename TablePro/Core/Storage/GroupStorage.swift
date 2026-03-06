@@ -45,15 +45,22 @@ final class GroupStorage {
         }
     }
 
-    /// Add a new group (rejects case-insensitive duplicate names)
-    func addGroup(_ group: ConnectionGroup) {
+    /// Add a new group (rejects case-insensitive duplicate names among siblings).
+    /// Returns `true` if the group was added, `false` if a sibling with the same name exists.
+    @discardableResult
+    func addGroup(_ group: ConnectionGroup) -> Bool {
         var groups = loadGroups()
-        if groups.contains(where: { $0.name.caseInsensitiveCompare(group.name) == .orderedSame }) {
+        let hasDuplicate = groups.contains {
+            $0.parentGroupId == group.parentGroupId
+                && $0.name.caseInsensitiveCompare(group.name) == .orderedSame
+        }
+        if hasDuplicate {
             Self.logger.debug("Ignoring attempt to add duplicate group name: \(group.name, privacy: .public)")
-            return
+            return false
         }
         groups.append(group)
         saveGroups(groups)
+        return true
     }
 
     /// Update an existing group
@@ -152,7 +159,7 @@ final class GroupStorage {
     // MARK: - Helpers
 
     /// Recursively collect all descendant group IDs
-    private func collectDescendantIds(of groupId: UUID, in groups: [ConnectionGroup]) -> Set<UUID> {
+    func collectDescendantIds(of groupId: UUID, in groups: [ConnectionGroup]) -> Set<UUID> {
         var result = Set<UUID>()
         let children = groups.filter { $0.parentGroupId == groupId }
         for child in children {

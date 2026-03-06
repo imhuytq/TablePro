@@ -22,12 +22,10 @@ struct WelcomeWindowView: View {
     @State private var searchText = ""
     @State private var showOnboarding = !AppSettingsStorage.shared.hasCompletedOnboarding()
 
-    // Group state
     @State private var groups: [ConnectionGroup] = []
     @State private var expandedGroups: Set<UUID> = []
     @State private var groupFormContext: GroupFormContext?
 
-    // Delete confirmation (2-step for non-empty groups)
     @State private var pendingDelete = PendingDelete()
     @State private var showDeleteStep1 = false
     @State private var showDeleteStep2 = false
@@ -112,8 +110,7 @@ struct WelcomeWindowView: View {
             ) { group in
                 if context.group != nil {
                     groupStorage.updateGroup(group)
-                } else {
-                    groupStorage.addGroup(group)
+                } else if groupStorage.addGroup(group) {
                     expandedGroups.insert(group.id)
                     groupStorage.saveExpandedGroupIds(expandedGroups)
                 }
@@ -286,8 +283,7 @@ struct WelcomeWindowView: View {
                         allConns[index] = updated
                     }
                 }
-                // Append any new entries (e.g. moved from another group)
-                for conn in reorderedConns where !allConns.contains(where: { $0.id == conn.id }) {
+                        for conn in reorderedConns where !allConns.contains(where: { $0.id == conn.id }) {
                     allConns.append(conn)
                 }
                 storage.saveConnections(allConns)
@@ -397,11 +393,9 @@ struct WelcomeWindowView: View {
     }
 
     private func connectToDatabase(_ connection: DatabaseConnection) {
-        // Open main window first, then connect in background
         openWindow(id: "main", value: EditorTabPayload(connectionId: connection.id))
         NSApplication.shared.closeWindows(withId: "welcome")
 
-        // Connect in background - main window shows loading state
         Task {
             do {
                 try await dbManager.connectToSession(connection)
@@ -427,13 +421,8 @@ struct WelcomeWindowView: View {
 
 
     private func duplicateConnection(_ connection: DatabaseConnection) {
-        // Create duplicate with new UUID and copy passwords
         let duplicate = storage.duplicateConnection(connection)
-
-        // Refresh connections list
         loadConnections()
-
-        // Open edit form for the duplicate so user can rename
         openWindow(id: "connection-form", value: duplicate.id as UUID?)
         focusConnectionFormWindow()
     }
@@ -465,7 +454,7 @@ struct WelcomeWindowView: View {
 
     private func deleteGroup(_ group: ConnectionGroup) {
         let allGroups = groupStorage.loadGroups()
-        let descendantIds = collectDescendantIds(of: group.id, in: allGroups)
+        let descendantIds = groupStorage.collectDescendantIds(of: group.id, in: allGroups)
         let allDeletedIds = descendantIds.union([group.id])
         groupStorage.deleteGroup(group)
         expandedGroups.subtract(allDeletedIds)
@@ -479,38 +468,29 @@ struct WelcomeWindowView: View {
         loadConnections()
     }
 
-    private func collectDescendantIds(of groupId: UUID, in groups: [ConnectionGroup]) -> Set<UUID> {
-        var result = Set<UUID>()
-        let children = groups.filter { $0.parentGroupId == groupId }
-        for child in children {
-            result.insert(child.id)
-            result.formUnion(collectDescendantIds(of: child.id, in: groups))
-        }
-        return result
-    }
-
     private func requestDelete(groups: [ConnectionGroup] = [], connections: [DatabaseConnection] = []) {
         // Collect all group IDs being deleted (including descendants)
         let allGroups = groupStorage.loadGroups()
         var deletedGroupIds = Set<UUID>()
         for group in groups {
             deletedGroupIds.insert(group.id)
-            deletedGroupIds.formUnion(collectDescendantIds(of: group.id, in: allGroups))
+            deletedGroupIds.formUnion(groupStorage.collectDescendantIds(of: group.id, in: allGroups))
         }
 
-        // Collect all affected connections: explicitly selected + inside deleted groups
+        // Count connections inside deleted groups (excluding explicitly selected ones)
         let allConnections = storage.loadConnections()
-        var affectedIds = Set(connections.map(\.id))
+        let explicitIds = Set(connections.map(\.id))
+        var groupResidentCount = 0
         for conn in allConnections {
-            if let gid = conn.groupId, deletedGroupIds.contains(gid) {
-                affectedIds.insert(conn.id)
+            if let gid = conn.groupId, deletedGroupIds.contains(gid), !explicitIds.contains(conn.id) {
+                groupResidentCount += 1
             }
         }
 
         pendingDelete = PendingDelete(
             groups: groups,
             connections: connections,
-            affectedConnectionCount: affectedIds.count
+            affectedConnectionCount: groupResidentCount
         )
         showDeleteStep1 = true
     }

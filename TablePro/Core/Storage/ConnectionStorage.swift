@@ -154,7 +154,7 @@ final class ConnectionStorage {
             saveKeyPassphrase(keyPassphrase, for: newId)
         }
 
-        return duplicate
+        return placed
     }
 
     // MARK: - Keychain (Password Storage)

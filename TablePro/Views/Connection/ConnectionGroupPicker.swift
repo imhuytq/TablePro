@@ -10,6 +10,8 @@ struct ConnectionGroupPicker: View {
     @Binding var selectedGroupId: UUID?
     @State private var allGroups: [ConnectionGroup] = []
     @State private var showingCreateSheet = false
+    @State private var showingDeleteConfirmation = false
+    @State private var groupToDelete: ConnectionGroup?
 
     private let groupStorage = GroupStorage.shared
 
@@ -61,7 +63,8 @@ struct ConnectionGroupPicker: View {
                 Menu("Manage Groups") {
                     ForEach(allGroups) { group in
                         Button(role: .destructive) {
-                            deleteGroup(group)
+                            groupToDelete = group
+                            showingDeleteConfirmation = true
                         } label: {
                             Label("Delete \"\(group.name)\"", systemImage: "trash")
                         }
@@ -87,9 +90,26 @@ struct ConnectionGroupPicker: View {
         .task { allGroups = groupStorage.loadGroups() }
         .sheet(isPresented: $showingCreateSheet) {
             ConnectionGroupFormSheet { newGroup in
-                groupStorage.addGroup(newGroup)
-                selectedGroupId = newGroup.id
+                if groupStorage.addGroup(newGroup) {
+                    selectedGroupId = newGroup.id
+                }
                 allGroups = groupStorage.loadGroups()
+            }
+        }
+        .confirmationDialog(
+            String(localized: "Delete Group"),
+            isPresented: $showingDeleteConfirmation,
+            presenting: groupToDelete
+        ) { group in
+            Button(String(localized: "Delete"), role: .destructive) {
+                deleteGroup(group)
+            }
+        } message: { group in
+            let count = groupStorage.connectionCount(for: group)
+            if count > 0 {
+                Text("Delete \"\(group.name)\" and its \(count) connection(s)?")
+            } else {
+                Text("Delete \"\(group.name)\"?")
             }
         }
     }

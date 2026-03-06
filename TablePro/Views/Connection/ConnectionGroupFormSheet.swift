@@ -33,7 +33,7 @@ struct ConnectionGroupFormSheet: View {
     private var availableGroups: [ConnectionGroup] {
         let allGroups = groupStorage.loadGroups()
         guard let editingGroup = group else { return allGroups }
-        let excludedIds = collectDescendantIds(of: editingGroup.id, in: allGroups)
+        let excludedIds = groupStorage.collectDescendantIds(of: editingGroup.id, in: allGroups)
             .union([editingGroup.id])
         return allGroups.filter { !excludedIds.contains($0.id) }
     }
@@ -121,15 +121,6 @@ struct ConnectionGroupFormSheet: View {
         dismiss()
     }
 
-    private func collectDescendantIds(of groupId: UUID, in groups: [ConnectionGroup]) -> Set<UUID> {
-        var result = Set<UUID>()
-        let children = groups.filter { $0.parentGroupId == groupId }
-        for child in children {
-            result.insert(child.id)
-            result.formUnion(collectDescendantIds(of: child.id, in: groups))
-        }
-        return result
-    }
 }
 
 // MARK: - Parent Group Picker

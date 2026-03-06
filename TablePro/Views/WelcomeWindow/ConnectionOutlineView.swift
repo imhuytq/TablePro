@@ -655,23 +655,16 @@ extension ConnectionOutlineView {
             // Disable drag in search mode
             guard !isSearchMode else { return nil }
 
-            isDragging = true
-
             // On first item of a drag, capture all selected IDs
-            if draggedItemIds.isEmpty {
+            if draggedItemIds.isEmpty, !isDragging {
                 var hasGroup = false
-                var hasConnection = false
                 for row in outlineView.selectedRowIndexes {
                     if outlineView.item(atRow: row) is OutlineGroup {
                         hasGroup = true
-                    } else if outlineView.item(atRow: row) is OutlineConnection {
-                        hasConnection = true
                     }
                 }
-                // Don't allow multi-drag when groups are involved (moving a parent already moves children)
                 let isMultiSelection = outlineView.selectedRowIndexes.count > 1
                 if isMultiSelection, hasGroup {
-                    isDragging = false
                     return nil
                 }
 
@@ -680,10 +673,10 @@ extension ConnectionOutlineView {
                         draggedItemIds.insert(conn.connection.id)
                     }
                 }
+                isDragging = true
             }
 
-            // If multi-drag was blocked, reject subsequent items too
-            if !isDragging { return nil }
+            guard isDragging else { return nil }
 
             let pasteboardItem = NSPasteboardItem()
             if let outlineGroup = item as? OutlineGroup {
@@ -1013,9 +1006,13 @@ extension ConnectionOutlineView {
                         .filter { $0.parentGroupId == newParentId && $0.id != group.id }
                         .sorted { $0.sortOrder < $1.sortOrder }
 
+                    // Adjust childIndex: NSOutlineView counts both groups and connections
+                    let childConns = childrenMap[newParentId]?.compactMap { $0 as? OutlineConnection } ?? []
+                    let groupIndex = max(0, childIndex - childConns.count)
+
                     var movedGroup = group
                     movedGroup.parentGroupId = newParentId
-                    siblings.insert(movedGroup, at: min(childIndex, siblings.count))
+                    siblings.insert(movedGroup, at: min(groupIndex, siblings.count))
 
                     for (order, var g) in siblings.enumerated() {
                         g.sortOrder = order
@@ -1042,9 +1039,13 @@ extension ConnectionOutlineView {
                         .filter { $0.parentGroupId == nil && $0.id != group.id }
                         .sorted { $0.sortOrder < $1.sortOrder }
 
+                    // Adjust childIndex: root items mix groups and connections
+                    let rootConnCount = rootItems.compactMap { $0 as? OutlineConnection }.count
+                    let groupIndex = max(0, childIndex - rootConnCount)
+
                     var movedGroup = group
                     movedGroup.parentGroupId = nil
-                    rootGroupSiblings.insert(movedGroup, at: min(childIndex, rootGroupSiblings.count))
+                    rootGroupSiblings.insert(movedGroup, at: min(groupIndex, rootGroupSiblings.count))
 
                     for (order, var g) in rootGroupSiblings.enumerated() {
                         g.sortOrder = order
@@ -1119,10 +1120,12 @@ extension ConnectionOutlineView {
             }
         }
 
-        private func totalConnectionCount(for groupId: UUID) -> Int {
+        private func totalConnectionCount(for groupId: UUID, visited: Set<UUID> = []) -> Int {
+            guard !visited.contains(groupId) else { return 0 }
             let directConns = parent.connections.filter { $0.groupId == groupId }.count
             let childGroupIds = parent.groups.filter { $0.parentGroupId == groupId }.map(\.id)
-            let nested = childGroupIds.reduce(0) { $0 + totalConnectionCount(for: $1) }
+            let nextVisited = visited.union([groupId])
+            let nested = childGroupIds.reduce(0) { $0 + totalConnectionCount(for: $1, visited: nextVisited) }
             return directConns + nested
         }
 
