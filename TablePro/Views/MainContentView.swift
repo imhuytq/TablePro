@@ -170,12 +170,22 @@ struct MainContentView: View {
 
         switch sheet {
         case .databaseSwitcher:
+            let session = DatabaseManager.shared.session(for: connection.id)
+            let activeDatabase = session?.currentDatabase ?? connection.database
+            let activeSchema = session?.currentSchema
+            let currentSelection = connection.type == .redshift
+                ? (activeSchema ?? activeDatabase)
+                : activeDatabase
             DatabaseSwitcherSheet(
                 isPresented: dismissBinding,
-                currentDatabase: connection.database,
+                currentDatabase: currentSelection,
+                currentSchema: activeSchema,
                 databaseType: connection.type,
                 connectionId: connection.id,
-                onSelect: switchDatabase
+                onSelect: switchDatabase,
+                onSelectSchema: { schema in
+                    Task { await coordinator.switchSchema(to: schema) }
+                }
             )
         case .exportDialog:
             ExportDialog(
@@ -217,6 +227,8 @@ struct MainContentView: View {
                 scheduleInspectorUpdate()
             }
             .onAppear {
+                coordinator.markActivated()
+
                 // Set window title for empty state (no tabs restored)
                 if tabManager.tabs.isEmpty {
                     windowTitle = connection.name
@@ -252,6 +264,10 @@ struct MainContentView: View {
             .onDisappear {
                 NativeTabRegistry.shared.unregister(windowId: windowId)
 
+                // Mark teardown intent synchronously so deinit doesn't warn
+                // if SwiftUI deallocates the coordinator before the delayed Task fires
+                coordinator.markTeardownScheduled()
+
                 let capturedWindowId = windowId
                 let connectionId = connection.id
                 let connectionName = connection.name
@@ -260,6 +276,7 @@ struct MainContentView: View {
 
                     // If this window re-registered (temporary disappear during tab group merge), skip cleanup
                     if NativeTabRegistry.shared.isRegistered(windowId: capturedWindowId) {
+                        coordinator.clearTeardownScheduled()
                         return
                     }
 

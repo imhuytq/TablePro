@@ -124,7 +124,8 @@ final class ConnectionStorage {
             mongoReadPreference: connection.mongoReadPreference,
             mongoWriteConcern: connection.mongoWriteConcern,
             sortOrder: connection.sortOrder,
-            redisDatabase: connection.redisDatabase
+            redisDatabase: connection.redisDatabase,
+            mssqlSchema: connection.mssqlSchema
         )
 
         // Insert duplicate right after the original by shifting siblings
@@ -378,6 +379,9 @@ private struct StoredConnection: Codable {
     // Sort order
     let sortOrder: Int
 
+    // MSSQL schema
+    let mssqlSchema: String?
+
     init(from connection: DatabaseConnection) {
         self.id = connection.id
         self.name = connection.name
@@ -415,6 +419,9 @@ private struct StoredConnection: Codable {
 
         // Sort order
         self.sortOrder = connection.sortOrder
+
+        // MSSQL schema
+        self.mssqlSchema = connection.mssqlSchema
     }
 
     // Custom decoder to handle migration from old format
@@ -452,6 +459,7 @@ private struct StoredConnection: Codable {
         isReadOnly = try container.decodeIfPresent(Bool.self, forKey: .isReadOnly) ?? false
         aiPolicy = try container.decodeIfPresent(String.self, forKey: .aiPolicy)
         sortOrder = try container.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
+        mssqlSchema = try container.decodeIfPresent(String.self, forKey: .mssqlSchema)
     }
 
     func toConnection() -> DatabaseConnection {
@@ -492,7 +500,8 @@ private struct StoredConnection: Codable {
             groupId: parsedGroupId,
             isReadOnly: isReadOnly,
             aiPolicy: parsedAIPolicy,
-            sortOrder: sortOrder
+            sortOrder: sortOrder,
+            mssqlSchema: mssqlSchema
         )
     }
 }

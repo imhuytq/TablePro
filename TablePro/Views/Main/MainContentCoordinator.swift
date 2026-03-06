@@ -53,7 +53,7 @@ final class MainContentCoordinator {
 
     // MARK: - Dependencies
 
-    nonisolated(unsafe) let connection: DatabaseConnection
+    let connection: DatabaseConnection
     var connectionId: UUID { connection.id }
     let tabManager: QueryTabManager
     let changeManager: DataChangeManager
@@ -95,8 +95,31 @@ final class MainContentCoordinator {
     /// side-effect window creation during the switch cascade.
     var isSwitchingDatabase = false
 
+    /// True once the coordinator's view has appeared (onAppear fired).
+    /// Coordinators that SwiftUI creates during body re-evaluation but never
+    /// adopts into @State are silently discarded — no teardown warning needed.
+    @ObservationIgnored nonisolated(unsafe) private var didActivate = false
+
     /// Tracks whether teardown() was called; used by deinit to log missed teardowns
-    @ObservationIgnored private var didTeardown = false
+    @ObservationIgnored nonisolated(unsafe) private var didTeardown = false
+
+    /// Tracks whether teardown has been scheduled (but not yet executed)
+    /// so deinit doesn't warn if SwiftUI deallocates before the delayed Task fires
+    @ObservationIgnored nonisolated(unsafe) private var teardownScheduled = false
+
+    /// Set when NSApplication is terminating — suppresses deinit warning since
+    /// SwiftUI does not call onDisappear during app termination
+    nonisolated(unsafe) private static var isAppTerminating = false
+
+    private static let registerTerminationObserver: Void = {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainContentCoordinator.isAppTerminating = true
+        }
+    }()
 
     /// Remove sort cache entries for tabs that no longer exist
     func cleanupSortCache(openTabIds: Set<UUID>) {
@@ -137,6 +160,20 @@ final class MainContentCoordinator {
 
         Self.retainSchemaProvider(for: connection.id)
         setupURLNotificationObservers()
+
+        _ = Self.registerTerminationObserver
+    }
+
+    func markActivated() {
+        didActivate = true
+    }
+
+    func markTeardownScheduled() {
+        teardownScheduled = true
+    }
+
+    func clearTeardownScheduled() {
+        teardownScheduled = false
     }
 
     /// Explicit cleanup called from `onDisappear`. Releases schema provider
@@ -162,12 +199,30 @@ final class MainContentCoordinator {
 
     deinit {
         let connectionId = connection.id
-        guard !didTeardown else { return }
-        let logger = Logger(subsystem: "com.TablePro", category: "MainContentCoordinator")
-        logger.warning("teardown() was not called before deallocation for connection \(connectionId)")
-        Task { @MainActor in
-            MainContentCoordinator.releaseSchemaProvider(for: connectionId)
-            MainContentCoordinator.purgeUnusedSchemaProviders()
+        let alreadyHandled = didTeardown || teardownScheduled
+
+        // Never-activated coordinators are throwaway instances created by SwiftUI
+        // during body re-evaluation — @State only keeps the first, rest are discarded
+        guard didActivate else {
+            if !alreadyHandled {
+                Task { @MainActor in
+                    MainContentCoordinator.releaseSchemaProvider(for: connectionId)
+                    MainContentCoordinator.purgeUnusedSchemaProviders()
+                }
+            }
+            return
+        }
+
+        if !alreadyHandled && !Self.isAppTerminating {
+            let logger = Logger(subsystem: "com.TablePro", category: "MainContentCoordinator")
+            logger.warning("teardown() was not called before deallocation for connection \(connectionId)")
+        }
+
+        if !alreadyHandled {
+            Task { @MainActor in
+                MainContentCoordinator.releaseSchemaProvider(for: connectionId)
+                MainContentCoordinator.purgeUnusedSchemaProviders()
+            }
         }
     }
 
@@ -241,7 +296,7 @@ final class MainContentCoordinator {
 
     /// Pre-compiled regex for extracting table name from SELECT queries
     private static let tableNameRegex = try? NSRegularExpression(
-        pattern: #"(?i)^\s*SELECT\s+.+?\s+FROM\s+[`"]?(\w+)[`"]?\s*(?:WHERE|ORDER|LIMIT|GROUP|HAVING|$|;)"#,
+        pattern: #"(?i)^\s*SELECT\s+.+?\s+FROM\s+(?:\[(\w+)\]|[`"]?(\w+)[`"]?)\s*(?:WHERE|ORDER|LIMIT|GROUP|HAVING|OFFSET|$|;)"#,
         options: []
     )
 
@@ -372,6 +427,8 @@ final class MainContentCoordinator {
         // Build database-specific EXPLAIN prefix
         let explainSQL: String
         switch connection.type {
+        case .mssql:
+            return
         case .sqlite:
             explainSQL = "EXPLAIN QUERY PLAN \(stmt)"
         case .mysql, .mariadb, .postgresql, .redshift:
@@ -497,7 +554,7 @@ final class MainContentCoordinator {
                 }
 
                 // Parse schema metadata if available
-                let metadata = schemaResult.map { parseSchemaMetadata($0) }
+                let metadata = schemaResult.map { self.parseSchemaMetadata($0) }
 
                 // Phase 1: Display data rows + FK arrows in a single MainActor update.
                 await MainActor.run { [weak self] in
@@ -630,11 +687,15 @@ final class MainContentCoordinator {
     func extractTableName(from sql: String) -> String? {
         let nsRange = NSRange(sql.startIndex..., in: sql)
 
-        // SQL: SELECT ... FROM tableName
+        // SQL: SELECT ... FROM tableName  (group 1 = bracket-quoted, group 2 = plain/backtick/double-quote)
         if let regex = Self.tableNameRegex,
-           let match = regex.firstMatch(in: sql, options: [], range: nsRange),
-           let range = Range(match.range(at: 1), in: sql) {
-            return String(sql[range])
+           let match = regex.firstMatch(in: sql, options: [], range: nsRange) {
+            for group in 1...2 {
+                let r = match.range(at: group)
+                if r.location != NSNotFound, let range = Range(r, in: sql) {
+                    return String(sql[range])
+                }
+            }
         }
 
         // MQL bracket notation: db["collectionName"].find(...)
@@ -1105,78 +1166,6 @@ final class MainContentCoordinator {
         }
     }
 
-    // MARK: - Table Creation
-
-    /// Execute sidebar changes immediately (single transaction)
-    func executeSidebarChanges(statements: [String]) async throws {
-        guard let driver = DatabaseManager.shared.driver(for: connectionId) else {
-            throw DatabaseError.notConnected
-        }
-
-        let dbType = connection.type
-        var allStatements: [String] = []
-
-        // Add database-specific BEGIN / START TRANSACTION
-        let beginStatement: String
-        switch dbType {
-        case .mysql, .mariadb:
-            beginStatement = "START TRANSACTION"
-        default:
-            beginStatement = "BEGIN"
-        }
-        allStatements.append(beginStatement)
-
-        // Add user statements
-        allStatements.append(contentsOf: statements)
-
-        // Add COMMIT
-        allStatements.append("COMMIT")
-
-        // Execute all statements sequentially
-        do {
-            for sql in allStatements {
-                _ = try await driver.execute(query: sql)
-            }
-        } catch {
-            // Try to rollback on error
-            _ = try? await driver.execute(query: "ROLLBACK")
-            throw error
-        }
-    }
-
-    // MARK: - Discard Handling
-
-    func handleDiscard(
-        pendingTruncates: inout Set<String>,
-        pendingDeletes: inout Set<String>
-    ) {
-        let originalValues = changeManager.getOriginalValues()
-        if let index = tabManager.selectedTabIndex {
-            for (rowIndex, columnIndex, originalValue) in originalValues {
-                if rowIndex < tabManager.tabs[index].resultRows.count {
-                    tabManager.tabs[index].resultRows[rowIndex].values[columnIndex] = originalValue
-                }
-            }
-
-            let insertedIndices = changeManager.insertedRowIndices.sorted(by: >)
-            for rowIndex in insertedIndices {
-                if rowIndex < tabManager.tabs[index].resultRows.count {
-                    tabManager.tabs[index].resultRows.remove(at: rowIndex)
-                }
-            }
-        }
-
-        pendingTruncates.removeAll()
-        pendingDeletes.removeAll()
-        changeManager.clearChanges()
-
-        if let index = tabManager.selectedTabIndex {
-            tabManager.tabs[index].pendingChanges = TabPendingChanges()
-        }
-
-        NotificationCenter.default.post(name: .databaseDidConnect, object: nil)
-    }
-
     /// Remove shared schema provider when a connection disconnects
     static func clearSharedSchema(for connectionId: UUID) {
         sharedSchemaProviders.removeValue(forKey: connectionId)
@@ -1337,7 +1326,7 @@ private extension MainContentCoordinator {
         updatedTab.isEditable = isEditable && updatedTab.isEditable
         if conn.type == .redis {
             // Populate enum values from column types for the enum popover
-            for (index, colType) in (updatedTab.columnTypes ?? []).enumerated() {
+            for (index, colType) in updatedTab.columnTypes.enumerated() {
                 if case .enumType(_, let values) = colType, let vals = values, index < updatedTab.resultColumns.count {
                     updatedTab.columnEnumValues[updatedTab.resultColumns[index]] = vals
                 }

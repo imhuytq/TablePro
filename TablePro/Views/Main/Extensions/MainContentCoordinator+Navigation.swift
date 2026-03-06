@@ -207,6 +207,23 @@ extension MainContentCoordinator {
             AND name NOT LIKE 'sqlite_%'
             ORDER BY name
             """
+        case .mssql:
+            sql = """
+            SELECT
+                s.name as schema_name,
+                t.name as name,
+                CASE WHEN v.object_id IS NOT NULL THEN 'VIEW' ELSE 'TABLE' END as kind,
+                p.rows as estimated_rows,
+                CAST(ROUND(SUM(a.total_pages) * 8 / 1024.0, 2) AS VARCHAR) + ' MB' as total_size
+            FROM sys.tables t
+            INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+            INNER JOIN sys.indexes i ON t.object_id = i.object_id AND i.index_id IN (0, 1)
+            INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
+            INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
+            LEFT JOIN sys.views v ON t.object_id = v.object_id
+            GROUP BY s.name, t.name, p.rows, v.object_id
+            ORDER BY t.name
+            """
         case .mongodb:
             tabManager.addTab(
                 initialQuery: "db.runCommand({\"listCollections\": 1, \"nameOnly\": false})",
@@ -284,20 +301,35 @@ extension MainContentCoordinator {
                 // Reload schema for autocomplete.
                 // session.tables was cleared above, which triggers SidebarView.loadTables() via onChange.
                 await loadSchema()
-            } else if connection.type == .postgresql || connection.type == .redshift {
-                // PostgreSQL: switch schema (not database — PG database switching requires reconnection)
-                if let pgDriver = driver as? PostgreSQLDriver {
-                    try await pgDriver.switchSchema(to: database)
-                } else if let rsDriver = driver as? RedshiftDriver {
+            } else if connection.type == .postgresql {
+                DatabaseManager.shared.updateSession(connectionId) { session in
+                    session.connection.database = database
+                    session.currentDatabase = database
+                    session.currentSchema = nil
+                    session.tables = []  // triggers SidebarView.loadTables() via onChange
+                }
+
+                toolbarState.databaseName = database
+
+                closeSiblingNativeWindows()
+                tabManager.tabs = []
+                tabManager.selectedTabId = nil
+
+                await DatabaseManager.shared.reconnectSession(connectionId)
+
+                await loadSchema()
+
+                NotificationCenter.default.post(name: .refreshData, object: nil)
+            } else if connection.type == .redshift {
+                // Redshift: switch schema
+                if let rsDriver = driver as? RedshiftDriver {
                     try await rsDriver.switchSchema(to: database)
                 } else {
                     return
                 }
 
                 // Also switch metadata driver's schema
-                if let pgMeta = DatabaseManager.shared.metadataDriver(for: connectionId) as? PostgreSQLDriver {
-                    try? await pgMeta.switchSchema(to: database)
-                } else if let rsMeta = DatabaseManager.shared.metadataDriver(for: connectionId) as? RedshiftDriver {
+                if let rsMeta = DatabaseManager.shared.metadataDriver(for: connectionId) as? RedshiftDriver {
                     try? await rsMeta.switchSchema(to: database)
                 }
 
@@ -321,6 +353,31 @@ extension MainContentCoordinator {
 
                 // Force sidebar reload — posting .refreshData ensures loadTables() runs
                 // even when session.tables was already [] (e.g. switching from empty schema back to public)
+                NotificationCenter.default.post(name: .refreshData, object: nil)
+            } else if connection.type == .mssql {
+                if let mssqlDriver = driver as? MSSQLDriver {
+                    try await mssqlDriver.switchDatabase(to: database)
+                }
+
+                if let mssqlMeta = DatabaseManager.shared.metadataDriver(for: connectionId) as? MSSQLDriver {
+                    try? await mssqlMeta.switchDatabase(to: database)
+                }
+
+                DatabaseManager.shared.updateSession(connectionId) { session in
+                    session.currentDatabase = database
+                    session.currentSchema = "dbo"
+                    session.tables = []
+                }
+                AppSettingsStorage.shared.saveLastDatabase(database, for: connectionId)
+
+                toolbarState.databaseName = database
+
+                closeSiblingNativeWindows()
+                tabManager.tabs = []
+                tabManager.selectedTabId = nil
+
+                await loadSchema()
+
                 NotificationCenter.default.post(name: .refreshData, object: nil)
             } else if connection.type == .mongodb {
                 // MongoDB: update the driver's connection so fetchTables/execute use the new database
@@ -380,6 +437,46 @@ extension MainContentCoordinator {
             navigationLogger.error("Failed to switch database: \(error.localizedDescription, privacy: .public)")
             AlertHelper.showErrorSheet(
                 title: String(localized: "Database Switch Failed"),
+                message: error.localizedDescription,
+                window: NSApplication.shared.keyWindow
+            )
+        }
+    }
+
+    /// Switch to a different PostgreSQL schema (used for URL-based schema selection)
+    func switchSchema(to schema: String) async {
+        guard connection.type == .postgresql else { return }
+        guard let driver = DatabaseManager.shared.driver(for: connectionId) else { return }
+
+        do {
+            if let pgDriver = driver as? PostgreSQLDriver {
+                try await pgDriver.switchSchema(to: schema)
+            } else {
+                return
+            }
+
+            if let pgMeta = DatabaseManager.shared.metadataDriver(for: connectionId) as? PostgreSQLDriver {
+                try? await pgMeta.switchSchema(to: schema)
+            }
+
+            DatabaseManager.shared.updateSession(connectionId) { session in
+                session.currentSchema = schema
+                session.tables = []
+            }
+
+            toolbarState.databaseName = schema
+
+            closeSiblingNativeWindows()
+            tabManager.tabs = []
+            tabManager.selectedTabId = nil
+
+            await loadSchema()
+
+            NotificationCenter.default.post(name: .refreshData, object: nil)
+        } catch {
+            navigationLogger.error("Failed to switch schema: \(error.localizedDescription, privacy: .public)")
+            AlertHelper.showErrorSheet(
+                title: String(localized: "Schema Switch Failed"),
                 message: error.localizedDescription,
                 window: NSApplication.shared.keyWindow
             )

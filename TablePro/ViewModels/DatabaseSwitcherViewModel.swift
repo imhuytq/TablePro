@@ -14,6 +14,14 @@ import SwiftUI
 @MainActor @Observable
 class DatabaseSwitcherViewModel {
     private static let logger = Logger(subsystem: "com.TablePro", category: "DatabaseSwitcherViewModel")
+
+    // MARK: - Mode
+
+    enum Mode: Hashable {
+        case database
+        case schema
+    }
+
     // MARK: - Published State
 
     var databases: [DatabaseMetadata] = []
@@ -23,14 +31,16 @@ class DatabaseSwitcherViewModel {
     var isLoading = false
     var errorMessage: String?
     var showPreview = false
+    var mode: Mode
 
-    /// Whether we're switching schemas (PostgreSQL) or databases (MySQL)
-    var isSchemaMode: Bool { databaseType == .postgresql || databaseType == .redshift }
+    /// Whether we're switching schemas (Redshift or PostgreSQL in schema mode)
+    var isSchemaMode: Bool { mode == .schema }
 
     // MARK: - Dependencies
 
     private let connectionId: UUID
     private let currentDatabase: String?
+    private let currentSchema: String?
     private let databaseType: DatabaseType
 
     // MARK: - Computed Properties
@@ -59,60 +69,65 @@ class DatabaseSwitcherViewModel {
 
     // MARK: - Initialization
 
-    init(connectionId: UUID, currentDatabase: String?, databaseType: DatabaseType) {
+    init(
+        connectionId: UUID, currentDatabase: String?, currentSchema: String?,
+        databaseType: DatabaseType
+    ) {
         self.connectionId = connectionId
         self.currentDatabase = currentDatabase
+        self.currentSchema = currentSchema
         self.databaseType = databaseType
+        self.mode = databaseType == .redshift ? .schema : .database
         self.recentDatabases = UserDefaults.standard.recentDatabases(for: connectionId)
     }
 
     // MARK: - Public Methods
 
-    /// Fetch databases (or schemas for PostgreSQL) and their metadata
+    /// Fetch databases (or schemas for Redshift) and their metadata
     func fetchDatabases() async {
         isLoading = true
         errorMessage = nil
 
         do {
             guard let driver = DatabaseManager.shared.driver(for: connectionId) else {
-                errorMessage = "No active connection"
+                errorMessage = String(localized: "No active connection")
                 isLoading = false
                 return
             }
 
             if isSchemaMode {
-                // PostgreSQL: fetch schemas instead of databases
+                // Redshift: fetch schemas instead of databases
                 let schemaNames = try await driver.fetchSchemas()
                 databases = schemaNames.map { name in
                     DatabaseMetadata.minimal(name: name, isSystem: isSystemItem(name))
                 }
             } else {
-                // MySQL/MariaDB: fetch databases with metadata
+                // MySQL/MariaDB/PostgreSQL: fetch databases with metadata
+                // Show database names immediately, then load metadata
                 let dbNames = try await driver.fetchDatabases()
-
-                let metadataList = await withTaskGroup(of: DatabaseMetadata?.self) { group in
-                    for dbName in dbNames {
-                        group.addTask {
-                            await self.fetchMetadata(for: dbName, driver: driver)
-                        }
-                    }
-
-                    var results: [DatabaseMetadata] = []
-                    for await metadata in group {
-                        if let metadata = metadata {
-                            results.append(metadata)
-                        }
-                    }
-                    return results
+                databases = dbNames.sorted().map { name in
+                    DatabaseMetadata.minimal(name: name, isSystem: isSystemItem(name))
                 }
 
-                databases = metadataList.sorted { $0.name < $1.name }
+                // Pre-select before metadata loads so the UI is interactive immediately
+                preselectDatabase()
+
+                // Fetch all metadata in a single batched query
+                isLoading = false
+                do {
+                    let metadataList = try await driver.fetchAllDatabaseMetadata()
+                    databases = metadataList.sorted { $0.name < $1.name }
+                } catch {
+                    Self.logger.error("Failed to fetch database metadata: \(error)")
+                }
+                return
             }
 
             isLoading = false
 
             // Pre-select current database/schema or first item
-            if let current = currentDatabase, databases.contains(where: { $0.name == current }) {
+            let current = isSchemaMode ? currentSchema : currentDatabase
+            if let current, databases.contains(where: { $0.name == current }) {
                 selectedDatabase = current
             } else {
                 selectedDatabase = databases.first?.name
@@ -145,16 +160,11 @@ class DatabaseSwitcherViewModel {
 
     // MARK: - Private Methods
 
-    /// Fetch metadata for a single database
-    private func fetchMetadata(for database: String, driver: DatabaseDriver) async
-    -> DatabaseMetadata?
-    {
-        do {
-            return try await driver.fetchDatabaseMetadata(database)
-        } catch {
-            // If metadata fetch fails, return minimal metadata
-            Self.logger.error("Failed to fetch metadata for \(database): \(error)")
-            return DatabaseMetadata.minimal(name: database, isSystem: isSystemItem(database))
+    private func preselectDatabase() {
+        if let current = currentDatabase, databases.contains(where: { $0.name == current }) {
+            selectedDatabase = current
+        } else {
+            selectedDatabase = databases.first?.name
         }
     }
 
@@ -176,6 +186,8 @@ class DatabaseSwitcherViewModel {
             return false
         case .redis:
             return false
+        case .mssql:
+            return ["master", "tempdb", "model", "msdb"].contains(name)
         }
     }
 }

@@ -350,10 +350,12 @@ final class RedisDriver: DatabaseDriver {
         // Sample a few keys to show type distribution
         let keys = try await scanAllKeys(connection: conn, pattern: nil, maxKeys: 100)
         if !keys.isEmpty {
+            let typeCommands = keys.map { ["TYPE", $0] }
+            let replies = try await conn.executePipeline(typeCommands)
+
             var typeCounts: [String: Int] = [:]
-            for key in keys {
-                if let typeResult = try? await conn.executeCommand(["TYPE", key]),
-                   let typeName = typeResult.stringValue {
+            for reply in replies {
+                if let typeName = reply.stringValue {
                     typeCounts[typeName, default: 0] += 1
                 }
             }
@@ -433,7 +435,7 @@ final class RedisDriver: DatabaseDriver {
             for line in infoStr.components(separatedBy: .newlines) {
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.hasPrefix("\(dbName):") {
-                    let statsStr = String(trimmed[trimmed.index(trimmed.startIndex, offsetBy: dbName.count + 1)...])
+                    let statsStr = (trimmed as NSString).substring(from: dbName.count + 1)
                     for stat in statsStr.components(separatedBy: ",") {
                         let parts = stat.components(separatedBy: "=")
                         if parts.count == 2, parts[0] == "keys", let count = Int(parts[1]) {
