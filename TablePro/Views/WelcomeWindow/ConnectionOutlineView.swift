@@ -1019,13 +1019,13 @@ extension ConnectionOutlineView {
                         .filter { $0.parentGroupId == newParentId && $0.id != group.id }
                         .sorted { $0.sortOrder < $1.sortOrder }
 
-                    // Adjust childIndex: NSOutlineView counts both groups and connections
-                    let childConns = childrenMap[newParentId]?.compactMap { $0 as? OutlineConnection } ?? []
-                    let groupIndex = max(0, childIndex - childConns.count)
+                    // childIndex is in childrenMap order (groups first, then connections).
+                    // Clamp to sibling group count since we only reorder among groups.
+                    let groupIndex = min(childIndex, siblings.count)
 
                     var movedGroup = group
                     movedGroup.parentGroupId = newParentId
-                    siblings.insert(movedGroup, at: min(groupIndex, siblings.count))
+                    siblings.insert(movedGroup, at: groupIndex)
 
                     for (order, var g) in siblings.enumerated() {
                         g.sortOrder = order
@@ -1052,13 +1052,13 @@ extension ConnectionOutlineView {
                         .filter { $0.parentGroupId == nil && $0.id != group.id }
                         .sorted { $0.sortOrder < $1.sortOrder }
 
-                    // Adjust childIndex: root items mix groups and connections
-                    let rootConnCount = rootItems.compactMap { $0 as? OutlineConnection }.count
-                    let groupIndex = max(0, childIndex - rootConnCount)
+                    // childIndex is in rootItems order (groups first, then connections).
+                    // Clamp to group count since we only reorder among groups.
+                    let groupIndex = min(childIndex, rootGroupSiblings.count)
 
                     var movedGroup = group
                     movedGroup.parentGroupId = nil
-                    rootGroupSiblings.insert(movedGroup, at: min(groupIndex, rootGroupSiblings.count))
+                    rootGroupSiblings.insert(movedGroup, at: groupIndex)
 
                     for (order, var g) in rootGroupSiblings.enumerated() {
                         g.sortOrder = order
